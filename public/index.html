@@ -175,6 +175,11 @@ img{max-width:100%}
 .login form{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:30px clamp(18px,5vw,36px);width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px}
 .login h1{font-size:clamp(3.4rem,14vw,4.6rem)}
 .login p{margin:0;color:var(--muted)}
+.link-box{margin-bottom:6px}
+.linkrow{display:flex;gap:8px;flex-wrap:wrap}
+.linkrow input{flex:1 1 220px;min-width:0}
+.or{display:flex;align-items:center;gap:12px;color:var(--muted);font-weight:800;margin:18px 0 14px}
+.or::before,.or::after{content:"";flex:1;height:2px;background:var(--line)}
 .logout{background:none;border:0;color:var(--muted);text-decoration:underline;cursor:pointer;font-size:.85rem;padding:0;margin-top:10px}
 </style>
 </head>
@@ -371,10 +376,15 @@ function releaseWake(){try{wakeLock&&wakeLock.release();}catch{}wakeLock=null;}
 function shortUrl(u){try{return new URL(u).hostname.replace(/^www\./,"");}catch{return u;}}
 
 function openForm(r){
-  const isNew=!r||!r.id; r=r||{};
+  const isNew=!r||!r.id; const fromLink=isNew&&!!(r&&r.title); r=r||{};
   const catOpts=allCats().map(c=>`<option ${c===r.category?"selected":""}>${esc(c)}</option>`).join("")+`<option value="__new">קטגוריה חדשה…</option>`;
-  shell(`<div class="form-head"><h2>${isNew?"מתכון חדש":"עריכת מתכון"}</h2></div>
-    <div class="inner"><form class="form" id="mf">
+  const linkUI=isNew&&!fromLink?`<div class="callout link-box"><div class="f"><label for="fUrl">הוספה מלינק</label>
+      <span class="hint">מדביקים לינק לדף המתכון, והספר ממלא את כל השדות ובוחר קטגוריה. אחר כך רק בודקים ושומרים.</span>
+      <div class="linkrow"><input id="fUrl" type="url" dir="ltr" inputmode="url" placeholder="https://" autocomplete="off"><button class="btn" id="readUrl" type="button">קרא את המתכון</button></div>
+      <span id="uMsg" class="hint live" aria-live="polite"></span></div></div>
+    <div class="or">או מלאו בעצמכם</div>`:"";
+  shell(`<div class="form-head"><h2>${!isNew?"עריכת מתכון":fromLink?"בדקו ושמרו":"מתכון חדש"}</h2></div>
+    <div class="inner">${linkUI}<form class="form" id="mf">
     <div class="f"><label for="fTitle">שם המתכון</label><input id="fTitle" required value="${esc(r.title)}"></div>
     <div class="row"><div class="f"><label for="fCat">קטגוריה</label><select id="fCat">${catOpts}</select><input id="fCatNew" placeholder="שם הקטגוריה" hidden></div>
       <div class="f"><label for="fTime">זמן</label><input id="fTime" value="${esc(r.time)}" placeholder="45 דקות"></div>
@@ -386,6 +396,18 @@ function openForm(r){
     <div class="f"><label for="fSteps">שלבי ההכנה</label><span class="hint">שורה לכל שלב</span><textarea id="fSteps" style="min-height:190px">${esc((r.steps||[]).join("\n"))}</textarea></div>
     <div class="f"><label for="fNotes">הערות</label><textarea id="fNotes" style="min-height:60px">${esc(r.notes)}</textarea></div>
     <div class="row-btns"><button class="btn big" type="submit" id="save">שמירה בספר</button><span id="sMsg" class="err"></span></div></form></div>`);
+  if(linkUI){
+    const read=async()=>{
+      const url=$("#fUrl").value.trim();
+      if(!url){$("#uMsg").textContent="הדביקו קודם לינק למתכון.";return;}
+      $("#readUrl").disabled=true;$("#uMsg").textContent="קורא את המתכון…";
+      try{const {recipe}=await api("POST",{url,categories:allCats()},null,"/api/import");openForm(recipe);}
+      catch(err){$("#readUrl").disabled=false;$("#uMsg").textContent=err.message;}
+    };
+    $("#readUrl").onclick=read;
+    $("#fUrl").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();read();}};
+    $("#fUrl").focus();
+  }
   $("#fCat").onchange=e=>{$("#fCatNew").hidden=e.target.value!=="__new";};
   if(r.category&&!allCats().includes(r.category)){$("#fCat").value="__new";$("#fCatNew").hidden=false;$("#fCatNew").value=r.category;}
   $("#mf").onsubmit=async e=>{
@@ -401,13 +423,15 @@ function openForm(r){
 }
 
 /* Talking to the site's API. The family password travels in a header; a 401 sends the viewer back to the login screen. */
-async function api(method,body,id){
+const IMPORT_ERRORS={bad_url:"זה לא נראה כמו לינק לאתר. בדקו שהוא מתחיל ב-https://",fetch_failed:"לא הצלחתי לפתוח את הדף. בדקו את הלינק, או מלאו את המתכון בעצמכם.",
+  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם, או שלחו את הלינק ל-Claude.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
+async function api(method,body,id,path="/api/recipes"){
   let res;
-  try{res=await fetch("/api/recipes"+(id?`?id=${encodeURIComponent(id)}`:""),{method,headers:{"x-family-password":PW,...(body?{"content-type":"application/json"}:{})},body:body?JSON.stringify(body):undefined});}
+  try{res=await fetch(path+(id?`?id=${encodeURIComponent(id)}`:""),{method,headers:{"x-family-password":PW,...(body?{"content-type":"application/json"}:{})},body:body?JSON.stringify(body):undefined});}
   catch{throw new Error("אין חיבור לאינטרנט. נסו שוב.");}
   if(res.status===401){showLogin("הסיסמה השתנתה. הקלידו אותה שוב.");throw new Error("צריך להתחבר מחדש.");}
   const out=await res.json().catch(()=>({}));
-  if(!res.ok)throw new Error(out.error==="no_password_configured"?"עוד לא הוגדרה סיסמה משפחתית באתר.":"הפעולה נכשלה. נסו שוב.");
+  if(!res.ok)throw new Error(out.error==="no_password_configured"?"עוד לא הוגדרה סיסמה משפחתית באתר.":IMPORT_ERRORS[out.error]||"הפעולה נכשלה. נסו שוב.");
   return out;
 }
 async function load(){const {recipes:list}=await api("GET");recipes=list.map(index);ready=true;render();}

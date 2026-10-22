@@ -3,18 +3,8 @@
 // Recipes live in Netlify Blobs, one entry per recipe.
 import { getStore } from "@netlify/blobs";
 import { readFile } from "node:fs/promises";
-import { timingSafeEqual, randomUUID } from "node:crypto";
-
-const json = (body, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
-
-function passwordOk(req) {
-  const expected = Netlify.env.get("FAMILY_PASSWORD") || "";
-  const given = req.headers.get("x-family-password") || "";
-  if (!expected) return false;
-  const a = Buffer.from(given), b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
+import { randomUUID } from "node:crypto";
+import { json, checkPassword } from "../lib/auth.mjs";
 
 const FIELDS = ["title", "category", "time", "servings", "author", "source", "intro", "notes"];
 function clean(input, prev = {}) {
@@ -45,8 +35,8 @@ async function syncFromRepo(store) {
 }
 
 export default async (req) => {
-  if (!Netlify.env.get("FAMILY_PASSWORD")) return json({ error: "no_password_configured" }, 500);
-  if (!passwordOk(req)) return json({ error: "wrong_password" }, 401);
+  const denied = checkPassword(req);
+  if (denied) return denied;
 
   const store = getStore({ name: "recipes", consistency: "strong" });
   const url = new URL(req.url);

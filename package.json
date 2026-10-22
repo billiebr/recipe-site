@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@netlify/blobs": "^8.1.0"
+    "@anthropic-ai/sdk": "^1.1.0",
+    "@netlify/blobs": "^8.2.0",
+    "zod": "^4.6.7"
   }
 }
