@@ -431,7 +431,7 @@ async function api(method,body,id,path="/api/recipes"){
   catch{throw new Error("אין חיבור לאינטרנט. נסו שוב.");}
   if(res.status===401){showLogin("הסיסמה השתנתה. הקלידו אותה שוב.");throw new Error("צריך להתחבר מחדש.");}
   const out=await res.json().catch(()=>({}));
-  if(!res.ok)throw new Error(out.error==="no_password_configured"?"עוד לא הוגדרה סיסמה משפחתית באתר.":IMPORT_ERRORS[out.error]||"הפעולה נכשלה. נסו שוב.");
+  if(!res.ok)throw new Error(out.error==="no_password_configured"?"עוד לא הוגדרה סיסמה משפחתית באתר.":(IMPORT_ERRORS[out.error]||"הפעולה נכשלה. נסו שוב.")+(out.detail?` (פרטים: ${out.detail})`:""));
   return out;
 }
 async function load(){const {recipes:list}=await api("GET");recipes=list.map(index);ready=true;render();}

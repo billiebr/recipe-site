@@ -16,7 +16,8 @@ const AI_MS = 5500;
 const MAX_PAGE_BYTES = 3_000_000;
 const MAX_TEXT_CHARS = 30_000;
 
-class ImportError extends Error {}
+// code: what the page shows the family; detail: the technical reason, shown small underneath.
+class ImportError extends Error { constructor(code, detail = "") { super(code); this.detail = detail; } }
 
 function checkUrl(raw) {
   let u;
@@ -41,8 +42,8 @@ async function fetchPage(u) {
         "accept-language": "he,en;q=0.8",
       },
     });
-  } catch { throw new ImportError("fetch_failed"); }
-  if (!res.ok) throw new ImportError("fetch_failed");
+  } catch (e) { throw new ImportError("fetch_failed", e.name === "TimeoutError" ? `the site did not answer within ${FETCH_MS / 1000}s` : String(e.message)); }
+  if (!res.ok) throw new ImportError("fetch_failed", `the site answered ${res.status}`);
   const reader = res.body.getReader();
   const chunks = []; let size = 0;
   for (;;) {
@@ -178,15 +179,23 @@ async function withGemini(apiKey, source, categories) {
         generationConfig: { responseMimeType: "application/json", responseSchema: DRAFT_SCHEMA, maxOutputTokens: 8000 },
       }),
     });
-  } catch { throw new ImportError("read_failed"); }
+  } catch (e) {
+    throw new ImportError("read_failed", e.name === "TimeoutError" ? `Gemini did not answer within ${AI_MS / 1000}s` : `Gemini unreachable: ${e.message}`);
+  }
   if (!res.ok) {
-    console.error("gemini", res.status, (await res.text()).slice(0, 300));
-    throw new ImportError(res.status === 429 ? "busy" : "read_failed");
+    const body = await res.text();
+    console.error("gemini", res.status, body.slice(0, 500));
+    let message = body.slice(0, 200);
+    try { message = JSON.parse(body).error?.message || message; } catch { /* not JSON */ }
+    throw new ImportError(res.status === 429 ? "busy" : "read_failed", `Gemini ${res.status} (${model}): ${message}`);
   }
   const out = await res.json();
-  const text = (out.candidates?.[0]?.content?.parts || []).map(p => p.text || "").join("");
+  const cand = out.candidates?.[0];
+  const text = (cand?.content?.parts || []).map(p => p.text || "").join("");
   let draft;
-  try { draft = JSON.parse(text); } catch { throw new ImportError("read_failed"); }
+  try { draft = JSON.parse(text); } catch {
+    throw new ImportError("read_failed", `Gemini returned no usable answer (${cand?.finishReason || out.promptFeedback?.blockReason || "empty"})`);
+  }
   if (!draft.is_recipe) throw new ImportError("no_recipe");
   const str = v => String(v ?? "").trim();
   const list = v => (Array.isArray(v) ? v : []).map(str).filter(Boolean);
@@ -222,7 +231,10 @@ export default async (req) => {
       } catch (e) {
         // If Gemini is slow, out of free quota or unavailable, use the page's own recipe data.
         if (e instanceof ImportError && e.message === "no_recipe") throw e;
-        if (!data) throw e;
+        if (!data) {
+          if (e instanceof ImportError) { e.detail = `${e.detail}; the page has no embedded recipe data`; throw e; }
+          throw new ImportError("read_failed", String(e?.message || e));
+        }
         draft = mapDirect(data, categories);
       }
     } else {
@@ -232,9 +244,9 @@ export default async (req) => {
     if (!draft.title || (!draft.ingredients.length && !draft.steps.length)) throw new ImportError("no_recipe");
     return json({ recipe: { ...draft, source: url.href } });
   } catch (e) {
-    if (e instanceof ImportError) return json({ error: e.message }, 422);
+    if (e instanceof ImportError) return json({ error: e.message, detail: e.detail }, 422);
     console.error(e);
-    return json({ error: "read_failed" }, 500);
+    return json({ error: "read_failed", detail: String(e?.message || e).slice(0, 200) }, 500);
   }
 };
 
