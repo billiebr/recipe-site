@@ -2,19 +2,17 @@
 // Returns a filled-in draft (not saved): the page shows it in the form for a final check.
 //
 // 1. Fetch the page and pull out its schema.org Recipe data (most recipe sites embed it).
-// 2. With ANTHROPIC_API_KEY set, Claude turns that data (or the page text, when there is
-//    none) into Hebrew fields and picks the category. Without a key, the recipe data is
-//    mapped directly and the category is guessed from keywords.
-import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { z } from "zod";
+// 2. With GEMINI_API_KEY set (a free Google AI Studio key), Gemini turns that data (or the
+//    page text, when there is none) into Hebrew fields and picks the category. Without a
+//    key, or when Gemini is slow or over its free quota, the recipe data is mapped directly
+//    and the category is guessed from keywords.
 import { json, checkPassword } from "../lib/auth.mjs";
 
 const CATS = ["עיקריות", "מנות ראשונות", "סלטים", "מרקים", "תוספות", "מאפים ולחמים", "עוגות וקינוחים", "נשנושים", "ארוחת בוקר", "רטבים וממרחים", "משקאות"];
 
 // Netlify stops a function after about 10 seconds, so every step has its own deadline.
 const FETCH_MS = 4000;
-const CLAUDE_MS = 5500;
+const AI_MS = 5500;
 const MAX_PAGE_BYTES = 3_000_000;
 const MAX_TEXT_CHARS = 30_000;
 
@@ -142,38 +140,60 @@ function mapDirect(r, categories) {
   };
 }
 
-// ---- Claude ----
-const Draft = z.object({
-  is_recipe: z.boolean().describe("false when the page has no recipe in it"),
-  title: z.string(),
-  category: z.string().describe("one of the given categories, or a short new Hebrew category if none fits"),
-  author: z.string(),
-  intro: z.string().describe("one short sentence, or empty"),
-  servings: z.string(),
-  time: z.string().describe("total time in Hebrew words, e.g. ״45 דקות״, or empty"),
-  ingredients: z.array(z.string()).describe("one ingredient per entry with its quantity; a group header like ״לרוטב:״ ends with a colon"),
-  steps: z.array(z.string()).describe("one step per entry"),
-  notes: z.string().describe("tips from the page, or empty"),
-});
+// ---- Gemini ----
+const S = (description) => ({ type: "STRING", description });
+const DRAFT_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    is_recipe: { type: "BOOLEAN", description: "false when the page has no recipe in it" },
+    title: S("recipe name"),
+    category: S("one of the given categories, or a short new Hebrew category if none fits"),
+    author: S("who wrote the recipe, or empty"),
+    intro: S("one short sentence, or empty"),
+    servings: S("how many servings, e.g. ״4 מנות״, or empty"),
+    time: S("total time in Hebrew words, e.g. ״45 דקות״, or empty"),
+    ingredients: { type: "ARRAY", items: S("one ingredient with its quantity; a group header like ״לרוטב:״ ends with a colon") },
+    steps: { type: "ARRAY", items: S("one preparation step") },
+    notes: S("tips from the page, or empty"),
+  },
+  required: ["is_recipe", "title", "category", "author", "intro", "servings", "time", "ingredients", "steps", "notes"],
+};
 
-async function withClaude(apiKey, source, categories) {
-  const client = new Anthropic({ apiKey, timeout: CLAUDE_MS, maxRetries: 0 });
-  const response = await client.messages.parse({
-    // A fast model, so the reply arrives inside Netlify's 10-second function limit.
-    model: "claude-haiku-5-5",
-    max_tokens: 8000,
-    output_config: { effort: "low", format: zodOutputFormat(Draft) },
-    system:
-      "You turn a recipe web page into fields for a family's Hebrew recipe book. " +
-      "Write every value in Hebrew, translating if the page is in another language. " +
-      "Keep quantities and steps faithful to the page and do not invent anything; leave a field empty when the page does not say. " +
-      `Choose the category from this list: ${JSON.stringify(categories)}.`,
-    messages: [{ role: "user", content: source }],
-  });
-  if (response.stop_reason === "refusal" || !response.parsed_output) throw new ImportError("read_failed");
-  const { is_recipe, ...draft } = response.parsed_output;
-  if (!is_recipe) throw new ImportError("no_recipe");
-  return draft;
+async function withGemini(apiKey, source, categories) {
+  // flash-lite: fast enough for Netlify's 10-second limit, with the largest free daily quota.
+  const model = Netlify.env.get("GEMINI_MODEL") || "gemini-flash-lite-latest";
+  let res;
+  try {
+    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: "POST",
+      signal: AbortSignal.timeout(AI_MS),
+      headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text:
+          "You turn a recipe web page into fields for a family's Hebrew recipe book. " +
+          "Write every value in Hebrew, translating if the page is in another language. " +
+          "Keep quantities and steps faithful to the page and do not invent anything; leave a field empty when the page does not say. " +
+          `Choose the category from this list: ${JSON.stringify(categories)}.` }] },
+        contents: [{ role: "user", parts: [{ text: source }] }],
+        generationConfig: { responseMimeType: "application/json", responseSchema: DRAFT_SCHEMA, maxOutputTokens: 8000 },
+      }),
+    });
+  } catch { throw new ImportError("read_failed"); }
+  if (!res.ok) {
+    console.error("gemini", res.status, (await res.text()).slice(0, 300));
+    throw new ImportError(res.status === 429 ? "busy" : "read_failed");
+  }
+  const out = await res.json();
+  const text = (out.candidates?.[0]?.content?.parts || []).map(p => p.text || "").join("");
+  let draft;
+  try { draft = JSON.parse(text); } catch { throw new ImportError("read_failed"); }
+  if (!draft.is_recipe) throw new ImportError("no_recipe");
+  const str = v => String(v ?? "").trim();
+  const list = v => (Array.isArray(v) ? v : []).map(str).filter(Boolean);
+  return {
+    title: str(draft.title), category: str(draft.category) || "עיקריות", author: str(draft.author), intro: str(draft.intro),
+    servings: str(draft.servings), time: str(draft.time), ingredients: list(draft.ingredients), steps: list(draft.steps), notes: str(draft.notes),
+  };
 }
 
 export default async (req) => {
@@ -190,7 +210,7 @@ export default async (req) => {
     const url = checkUrl(body.url);
     const html = await fetchPage(url);
     const data = findRecipeData(html);
-    const apiKey = Netlify.env.get("ANTHROPIC_API_KEY");
+    const apiKey = Netlify.env.get("GEMINI_API_KEY");
     let draft;
     if (apiKey) {
       const { title, text } = pageText(html);
@@ -198,11 +218,11 @@ export default async (req) => {
         ? `Recipe data embedded in the page (schema.org):\n${JSON.stringify(data).slice(0, MAX_TEXT_CHARS)}`
         : `Page title: ${title}\n\nPage text:\n${text}`;
       try {
-        draft = await withClaude(apiKey, source, categories);
+        draft = await withGemini(apiKey, source, categories);
       } catch (e) {
-        // If Claude is slow or unavailable, fall back to the page's own recipe data.
+        // If Gemini is slow, out of free quota or unavailable, use the page's own recipe data.
         if (e instanceof ImportError && e.message === "no_recipe") throw e;
-        if (!data) throw new ImportError("read_failed");
+        if (!data) throw e;
         draft = mapDirect(data, categories);
       }
     } else {

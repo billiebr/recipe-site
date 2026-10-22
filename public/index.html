@@ -424,7 +424,7 @@ function openForm(r){
 
 /* Talking to the site's API. The family password travels in a header; a 401 sends the viewer back to the login screen. */
 const IMPORT_ERRORS={bad_url:"זה לא נראה כמו לינק לאתר. בדקו שהוא מתחיל ב-https://",fetch_failed:"לא הצלחתי לפתוח את הדף. בדקו את הלינק, או מלאו את המתכון בעצמכם.",
-  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם, או שלחו את הלינק ל-Claude.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
+  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם.",busy:"הקריאה האוטומטית הגיעה למכסה היומית החינמית. נסו שוב מחר, או מלאו את המתכון בעצמכם.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
 async function api(method,body,id,path="/api/recipes"){
   let res;
   try{res=await fetch(path+(id?`?id=${encodeURIComponent(id)}`:""),{method,headers:{"x-family-password":PW,...(body?{"content-type":"application/json"}:{})},body:body?JSON.stringify(body):undefined});}
