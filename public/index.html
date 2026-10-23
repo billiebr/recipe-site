@@ -95,8 +95,17 @@ main{display:flex;flex-direction:column;gap:40px}
 .vegan{position:relative;isolation:isolate}
 .vegan::before{content:"";position:absolute;inset-inline-end:-4px;top:-10px;width:46px;height:46px;background:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cpath%20fill%3D%22%234f9a3a%22%20d%3D%22M56%206C31%207%2011%2020%2010%2041c0%206%202%2011%204%2015%203-11%2011-22%2026-30-12%2010-18%2020-21%2031%204%202%208%203%2012%203%2021%200%2028-23%2025-54z%22/%3E%3C/svg%3E") no-repeat center/contain;opacity:.4;z-index:-1;pointer-events:none}
 .sheet h2.vegan::before{width:64px;height:64px;top:-14px;inset-inline-end:-48px;opacity:.6}
-.check{display:flex;align-items:center;gap:10px;font-weight:800;cursor:pointer;width:fit-content}
-.check input{width:20px;height:20px;accent-color:#4f9a3a;margin:0}
+/* vegan / not vegan switch in the recipe form */
+.toggle{border:0;margin:0;padding:0;min-width:0}
+.toggle legend{font-weight:800;font-size:.92rem;padding:0;margin-bottom:5px}
+.toggle .opts{display:inline-flex;border:2px solid var(--line);border-radius:999px;padding:3px;gap:3px;background:var(--card)}
+.toggle input{position:absolute;opacity:0;width:1px;height:1px}
+.toggle span{display:flex;align-items:center;gap:6px;padding:8px 18px;border-radius:999px;font-weight:800;cursor:pointer;color:var(--muted);transition:background .15s,color .15s}
+.toggle input:checked+span{background:var(--ink);color:var(--paper)}
+.toggle input.v:checked+span{background:#3f7f2e;color:#fff}
+.toggle input:focus-visible+span{outline:3px solid var(--lemon);outline-offset:2px}
+.toggle .leaf{width:16px;height:16px;flex:none;background:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cpath%20fill%3D%22%234f9a3a%22%20d%3D%22M56%206C31%207%2011%2020%2010%2041c0%206%202%2011%204%2015%203-11%2011-22%2026-30-12%2010-18%2020-21%2031%204%202%208%203%2012%203%2021%200%2028-23%2025-54z%22/%3E%3C/svg%3E") no-repeat center/contain}
+.toggle input.v:checked+span .leaf{filter:brightness(2.2)}
 .card p{margin:0;color:var(--muted);font-size:.93rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;padding-top:8px}
 .meta span{font-size:.78rem;font-weight:700;background:var(--soft);border-radius:6px;padding:2px 8px}
@@ -393,6 +402,10 @@ function openForm(r){
   shell(`<div class="form-head"><h2>${!isNew?"עריכת מתכון":fromLink?"בדקו ושמרו":"מתכון חדש"}</h2></div>
     <div class="inner">${linkUI}<form class="form" id="mf">
     <div class="f"><label for="fTitle">שם המתכון</label><input id="fTitle" required value="${esc(r.title)}"></div>
+    <fieldset class="toggle"><legend>טבעוני?</legend><div class="opts">
+      <label><input type="radio" name="vegan" id="fVeganYes" class="v" value="1" ${(r.title||r.id)&&isVegan(r)?"checked":""}><span><i class="leaf" aria-hidden="true"></i>טבעוני</span></label>
+      <label><input type="radio" name="vegan" id="fVeganNo" value="0" ${(r.title||r.id)&&isVegan(r)?"":"checked"}><span>לא טבעוני</span></label>
+    </div></fieldset>
     <div class="row"><div class="f"><label for="fCat">קטגוריה</label><select id="fCat">${catOpts}</select><input id="fCatNew" placeholder="שם הקטגוריה" hidden></div>
       <div class="f"><label for="fTime">זמן</label><input id="fTime" value="${esc(r.time)}" placeholder="45 דקות"></div>
       <div class="f"><label for="fServ">כמות</label><input id="fServ" value="${esc(r.servings)}" placeholder="4 מנות"></div></div>
@@ -402,7 +415,6 @@ function openForm(r){
     <div class="f"><label for="fIng">מצרכים</label><span class="hint">שורה לכל מצרך. שורה שמסתיימת בנקודתיים היא כותרת של קבוצה, למשל ״לרוטב:״</span><textarea id="fIng" style="min-height:170px">${esc((r.ingredients||[]).join("\n"))}</textarea></div>
     <div class="f"><label for="fSteps">שלבי ההכנה</label><span class="hint">שורה לכל שלב</span><textarea id="fSteps" style="min-height:190px">${esc((r.steps||[]).join("\n"))}</textarea></div>
     <div class="f"><label for="fNotes">הערות</label><textarea id="fNotes" style="min-height:60px">${esc(r.notes)}</textarea></div>
-    <label class="check" for="fVegan"><input type="checkbox" id="fVegan" ${(r.title||r.id)&&isVegan(r)?"checked":""}>מתכון טבעוני</label>
     <div class="row-btns"><button class="btn big" type="submit" id="save">שמירה בספר</button><span id="sMsg" class="err"></span></div></form></div>`);
   if(linkUI){
     const read=async()=>{
@@ -422,7 +434,7 @@ function openForm(r){
     e.preventDefault();
     const c=$("#fCat").value==="__new"?$("#fCatNew").value.trim()||"שונות":$("#fCat").value;
     const data={id:r.id,title:$("#fTitle").value.trim(),category:c,time:$("#fTime").value.trim(),servings:$("#fServ").value.trim(),author:$("#fAuthor").value.trim(),
-      source:$("#fSrc").value.trim(),intro:$("#fIntro").value.trim(),ingredients:lines($("#fIng").value),steps:lines($("#fSteps").value),notes:$("#fNotes").value.trim(),vegan:$("#fVegan").checked,createdAt:r.createdAt};
+      source:$("#fSrc").value.trim(),intro:$("#fIntro").value.trim(),ingredients:lines($("#fIng").value),steps:lines($("#fSteps").value),notes:$("#fNotes").value.trim(),vegan:$("#fVeganYes").checked,createdAt:r.createdAt};
     $("#save").disabled=true;$("#sMsg").textContent="";
     try{const {recipe}=await api("POST",data);
       recipes=recipes.filter(x=>x.id!==recipe.id).concat(index(recipe));cat=c;render();openRecipe(recipe.id);}
