@@ -10,9 +10,9 @@ import { json, checkPassword } from "../lib/auth.mjs";
 
 const CATS = ["עיקריות", "מנות ראשונות", "סלטים", "מרקים", "תוספות", "מאפים ולחמים", "עוגות וקינוחים", "נשנושים", "ארוחת בוקר", "רטבים וממרחים", "משקאות"];
 
-// Netlify stops a function after about 10 seconds, so every step has its own deadline.
-const FETCH_MS = 4000;
-const AI_MS = 5500;
+// Each step has its own deadline so a slow site or model ends with a clear message.
+const FETCH_MS = 6000;
+const AI_MS = 20000;
 const MAX_PAGE_BYTES = 3_000_000;
 const MAX_TEXT_CHARS = 30_000;
 
@@ -160,12 +160,29 @@ const DRAFT_SCHEMA = {
   required: ["is_recipe", "title", "category", "author", "intro", "servings", "time", "ingredients", "steps", "notes"],
 };
 
-async function withGemini(apiKey, source, categories) {
-  // flash-lite: fast enough for Netlify's 10-second limit, with the largest free daily quota.
-  const model = Netlify.env.get("GEMINI_MODEL") || "gemini-flash-lite-latest";
+// Which Gemini to call. A key the family saved under any name starting with GEMINI_API_KEY_
+// (e.g. GEMINI_API_KEY_recepies) goes straight to Google's free tier. Otherwise GEMINI_API_KEY is
+// used; when Netlify injected it (AI Gateway, with GOOGLE_GEMINI_BASE_URL set) requests go through
+// Netlify and use the account's monthly credits.
+const GOOGLE_BASE = "https://generativelanguage.googleapis.com";
+const clean = v => String(v || "").trim().replace(/^["']|["']$/g, "");
+function geminiSetup() {
+  const env = { ...process.env, ...(Netlify.env.toObject?.() || {}) };
+  const own = Object.keys(env).find(k => /^GEMINI_API_KEY_./i.test(k) && clean(env[k]));
+  if (own) return { key: clean(env[own]), base: GOOGLE_BASE, model: env.GEMINI_MODEL || "gemini-flash-lite-latest", source: own };
+  const key = clean(env.GEMINI_API_KEY);
+  if (!key) return null;
+  const gateway = clean(env.GOOGLE_GEMINI_BASE_URL);
+  return gateway
+    ? { key, base: gateway, model: env.GEMINI_MODEL || "gemini-3-flash-preview", source: "Netlify AI Gateway" }
+    : { key, base: GOOGLE_BASE, model: env.GEMINI_MODEL || "gemini-flash-lite-latest", source: "GEMINI_API_KEY" };
+}
+
+async function withGemini(setup, source, categories) {
+  const { key: apiKey, base, model } = setup;
   let res;
   try {
-    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    res = await fetch(`${base.replace(/\/+$/, "")}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
       method: "POST",
       signal: AbortSignal.timeout(AI_MS),
       headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
@@ -176,7 +193,10 @@ async function withGemini(apiKey, source, categories) {
           "Keep quantities and steps faithful to the page and do not invent anything; leave a field empty when the page does not say. " +
           `Choose the category from this list: ${JSON.stringify(categories)}.` }] },
         contents: [{ role: "user", parts: [{ text: source }] }],
-        generationConfig: { responseMimeType: "application/json", responseSchema: DRAFT_SCHEMA, maxOutputTokens: 8000 },
+        generationConfig: {
+          responseMimeType: "application/json", responseSchema: DRAFT_SCHEMA, maxOutputTokens: 8000,
+          ...(/^gemini-3/.test(model) ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
+        },
       }),
     });
   } catch (e) {
@@ -188,7 +208,7 @@ async function withGemini(apiKey, source, categories) {
     let message = body.slice(0, 200);
     try { message = JSON.parse(body).error?.message || message; } catch { /* not JSON */ }
     // For a rejected key, say what was saved (first 3 characters and length only) so a wrong value is easy to spot.
-    const keyHint = /api key/i.test(message) ? ` [saved key: starts "${apiKey.slice(0, 3)}", ${apiKey.length} characters]` : "";
+    const keyHint = /api key|auth|token/i.test(message) ? ` [key from ${setup.source}: starts "${apiKey.slice(0, 3)}", ${apiKey.length} characters]` : "";
     throw new ImportError(res.status === 429 ? "busy" : "read_failed", `Gemini ${res.status} (${model}): ${message}${keyHint}`);
   }
   const out = await res.json();
@@ -221,15 +241,15 @@ export default async (req) => {
     const url = checkUrl(body.url);
     const html = await fetchPage(url);
     const data = findRecipeData(html);
-    const apiKey = (Netlify.env.get("GEMINI_API_KEY") || "").trim().replace(/^["']|["']$/g, "");
+    const setup = geminiSetup();
     let draft;
-    if (apiKey) {
+    if (setup) {
       const { title, text } = pageText(html);
       const source = data
         ? `Recipe data embedded in the page (schema.org):\n${JSON.stringify(data).slice(0, MAX_TEXT_CHARS)}`
         : `Page title: ${title}\n\nPage text:\n${text}`;
       try {
-        draft = await withGemini(apiKey, source, categories);
+        draft = await withGemini(setup, source, categories);
       } catch (e) {
         // If Gemini is slow, out of free quota or unavailable, use the page's own recipe data.
         if (e instanceof ImportError && e.message === "no_recipe") throw e;
