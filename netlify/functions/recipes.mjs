@@ -11,6 +11,7 @@ function clean(input, prev = {}) {
   const r = {};
   for (const f of FIELDS) r[f] = String(input[f] ?? "").slice(0, 5000).trim();
   for (const f of ["ingredients", "steps"]) r[f] = (Array.isArray(input[f]) ? input[f] : []).map(s => String(s).slice(0, 2000).trim()).filter(Boolean).slice(0, 200);
+  if (typeof input.vegan === "boolean") r.vegan = input.vegan;
   r.createdAt = Number(prev.createdAt || input.createdAt) || Date.now();
   r.updatedAt = Date.now();
   return r;

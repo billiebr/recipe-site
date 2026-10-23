@@ -138,6 +138,7 @@ function mapDirect(r, categories) {
     ingredients: [].concat(r.recipeIngredient || r.ingredients || []).map(plain).filter(Boolean),
     steps: steps(r.recipeInstructions),
     notes: "",
+    vegan: [].concat(r.suitableForDiet || []).some(d => /vegan/i.test(String(d))) || /טבעונ|vegan/i.test([r.name, r.keywords, r.recipeCategory].flat().join(" ")),
   };
 }
 
@@ -156,8 +157,9 @@ const DRAFT_SCHEMA = {
     ingredients: { type: "ARRAY", items: S("one ingredient with its quantity; a group header like ״לרוטב:״ ends with a colon") },
     steps: { type: "ARRAY", items: S("one preparation step") },
     notes: S("tips from the page, or empty"),
+    vegan: { type: "BOOLEAN", description: "true only when the recipe has no animal products at all (no meat, fish, eggs, dairy or honey)" },
   },
-  required: ["is_recipe", "title", "category", "author", "intro", "servings", "time", "ingredients", "steps", "notes"],
+  required: ["is_recipe", "title", "category", "author", "intro", "servings", "time", "ingredients", "steps", "notes", "vegan"],
 };
 
 // Which Gemini to call. A key the family saved under any name starting with GEMINI_API_KEY_
@@ -224,6 +226,7 @@ async function withGemini(setup, source, categories) {
   return {
     title: str(draft.title), category: str(draft.category) || "עיקריות", author: str(draft.author), intro: str(draft.intro),
     servings: str(draft.servings), time: str(draft.time), ingredients: list(draft.ingredients), steps: list(draft.steps), notes: str(draft.notes),
+    vegan: draft.vegan === true,
   };
 }
 

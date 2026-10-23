@@ -91,6 +91,12 @@ main{display:flex;flex-direction:column;gap:40px}
 .head .lbl{position:relative;font-family:var(--hand);font-size:1.7rem;line-height:1;background:var(--t);color:var(--c);padding:4px 12px 2px;border-radius:6px;transform:rotate(-2deg)}
 .body{padding:16px 18px 18px;display:flex;flex-direction:column;gap:8px;flex:1}
 .card h3{font-family:var(--display);font-weight:700;font-size:2.1rem;line-height:.95;margin:0;text-wrap:balance}
+/* vegan recipes: a small green leaf behind the title */
+.vegan{position:relative;isolation:isolate}
+.vegan::before{content:"";position:absolute;inset-inline-end:-4px;top:-10px;width:46px;height:46px;background:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cpath%20fill%3D%22%234f9a3a%22%20d%3D%22M56%206C31%207%2011%2020%2010%2041c0%206%202%2011%204%2015%203-11%2011-22%2026-30-12%2010-18%2020-21%2031%204%202%208%203%2012%203%2021%200%2028-23%2025-54z%22/%3E%3C/svg%3E") no-repeat center/contain;opacity:.4;z-index:-1;pointer-events:none}
+.sheet h2.vegan::before{width:64px;height:64px;top:-14px;inset-inline-end:-48px;opacity:.6}
+.check{display:flex;align-items:center;gap:10px;font-weight:800;cursor:pointer;width:fit-content}
+.check input{width:20px;height:20px;accent-color:#4f9a3a;margin:0}
 .card p{margin:0;color:var(--muted);font-size:.93rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;padding-top:8px}
 .meta span{font-size:.78rem;font-weight:700;background:var(--soft);border-radius:6px;padding:2px 8px}
@@ -261,9 +267,10 @@ function hl(text,ts){
   let out="",open=false;chars.forEach((c,i)=>{if(on[i]&&!open){out+="<mark>";open=true;}if(!on[i]&&open){out+="</mark>";open=false;}out+=esc(c);});
   return out+(open?"</mark>":"");
 }
+const isVegan=r=>r.vegan===true||(r.vegan!==false&&/טבעונ|vegan/i.test([r.title,r.category,r.intro,r.notes].join(" ")));
 function index(r){
   r._t=norm(r.title);
-  r._all=norm([r.title,r.category,r.intro,r.author,r.notes,...(r.ingredients||[]),...(r.steps||[])].join(" \n "));
+  r._all=norm([r.title,r.category,r.intro,r.author,r.notes,isVegan(r)?"טבעוני":"",...(r.ingredients||[]),...(r.steps||[])].join(" \n "));
   return r;
 }
 function matches(r,ts){return ts.every(t=>r._all.includes(t));}
@@ -286,7 +293,7 @@ function card(r,ts){
   const hit=ts.length?hitLine(r,ts):"";
   return `<button class="card" data-id="${esc(r.id)}">
     <div class="head" style="${headVars(r.category)}"><span class="glyph" aria-hidden="true">${esc(initial(r.title))}</span><span class="lbl">${esc(catOf(r))}</span></div>
-    <div class="body"><h3>${hl(r.title,ts)}</h3>${hit||(r.intro?`<p>${hl(r.intro,ts)}</p>`:"")}
+    <div class="body"><h3${isVegan(r)?' class="vegan" title="טבעוני"':""}>${hl(r.title,ts)}</h3>${hit||(r.intro?`<p>${hl(r.intro,ts)}</p>`:"")}
     <div class="meta">${r.time?`<span>${esc(r.time.replace(/\s*\(.*\)/,""))}</span>`:""}${r.servings?`<span>${esc(r.servings)}</span>`:""}${r.author?`<span>${esc(r.author)}</span>`:""}</div></div></button>`;
 }
 
@@ -353,7 +360,7 @@ function openRecipe(id){
   const steps=(r.steps||[]).map(t=>`<li><span>${hl(t,ts)}</span></li>`).join("");
   const fact=(k,v)=>v?`<div><small>${k}</small><b>${esc(v)}</b></div>`:"";
   shell(`<div class="head" style="${headVars(r.category)}"><span class="glyph" aria-hidden="true">${esc(initial(r.title))}</span>
-      <span class="lbl">${esc(r.category||"שונות")}</span><h2>${esc(r.title)}</h2>${r.author?`<div class="byline">מאת ${esc(r.author)}</div>`:""}</div>
+      <span class="lbl">${esc(r.category||"שונות")}</span><h2${isVegan(r)?' class="vegan" title="טבעוני"':""}>${esc(r.title)}</h2>${r.author?`<div class="byline">מאת ${esc(r.author)}</div>`:""}</div>
     <div class="inner" style="--cat:${bg}">
       ${r.intro?`<p class="intro">${esc(r.intro)}</p>`:""}
       <div class="facts">${fact("זמן",r.time)}${fact("כמות",r.servings)}${fact("מצרכים",(r.ingredients||[]).filter(t=>!/[:：]$/.test(t)).length||"")}</div>
@@ -395,6 +402,7 @@ function openForm(r){
     <div class="f"><label for="fIng">מצרכים</label><span class="hint">שורה לכל מצרך. שורה שמסתיימת בנקודתיים היא כותרת של קבוצה, למשל ״לרוטב:״</span><textarea id="fIng" style="min-height:170px">${esc((r.ingredients||[]).join("\n"))}</textarea></div>
     <div class="f"><label for="fSteps">שלבי ההכנה</label><span class="hint">שורה לכל שלב</span><textarea id="fSteps" style="min-height:190px">${esc((r.steps||[]).join("\n"))}</textarea></div>
     <div class="f"><label for="fNotes">הערות</label><textarea id="fNotes" style="min-height:60px">${esc(r.notes)}</textarea></div>
+    <label class="check" for="fVegan"><input type="checkbox" id="fVegan" ${(r.title||r.id)&&isVegan(r)?"checked":""}>מתכון טבעוני</label>
     <div class="row-btns"><button class="btn big" type="submit" id="save">שמירה בספר</button><span id="sMsg" class="err"></span></div></form></div>`);
   if(linkUI){
     const read=async()=>{
@@ -414,7 +422,7 @@ function openForm(r){
     e.preventDefault();
     const c=$("#fCat").value==="__new"?$("#fCatNew").value.trim()||"שונות":$("#fCat").value;
     const data={id:r.id,title:$("#fTitle").value.trim(),category:c,time:$("#fTime").value.trim(),servings:$("#fServ").value.trim(),author:$("#fAuthor").value.trim(),
-      source:$("#fSrc").value.trim(),intro:$("#fIntro").value.trim(),ingredients:lines($("#fIng").value),steps:lines($("#fSteps").value),notes:$("#fNotes").value.trim(),createdAt:r.createdAt};
+      source:$("#fSrc").value.trim(),intro:$("#fIntro").value.trim(),ingredients:lines($("#fIng").value),steps:lines($("#fSteps").value),notes:$("#fNotes").value.trim(),vegan:$("#fVegan").checked,createdAt:r.createdAt};
     $("#save").disabled=true;$("#sMsg").textContent="";
     try{const {recipe}=await api("POST",data);
       recipes=recipes.filter(x=>x.id!==recipe.id).concat(index(recipe));cat=c;render();openRecipe(recipe.id);}
