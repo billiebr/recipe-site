@@ -187,7 +187,9 @@ async function withGemini(apiKey, source, categories) {
     console.error("gemini", res.status, body.slice(0, 500));
     let message = body.slice(0, 200);
     try { message = JSON.parse(body).error?.message || message; } catch { /* not JSON */ }
-    throw new ImportError(res.status === 429 ? "busy" : "read_failed", `Gemini ${res.status} (${model}): ${message}`);
+    // For a rejected key, say what was saved (first 3 characters and length only) so a wrong value is easy to spot.
+    const keyHint = /api key/i.test(message) ? ` [saved key: starts "${apiKey.slice(0, 3)}", ${apiKey.length} characters]` : "";
+    throw new ImportError(res.status === 429 ? "busy" : "read_failed", `Gemini ${res.status} (${model}): ${message}${keyHint}`);
   }
   const out = await res.json();
   const cand = out.candidates?.[0];
@@ -219,7 +221,7 @@ export default async (req) => {
     const url = checkUrl(body.url);
     const html = await fetchPage(url);
     const data = findRecipeData(html);
-    const apiKey = Netlify.env.get("GEMINI_API_KEY");
+    const apiKey = (Netlify.env.get("GEMINI_API_KEY") || "").trim().replace(/^["']|["']$/g, "");
     let draft;
     if (apiKey) {
       const { title, text } = pageText(html);
