@@ -191,6 +191,9 @@ img{max-width:100%}
 .login h1{font-size:clamp(3.4rem,14vw,4.6rem)}
 .login p{margin:0;color:var(--muted)}
 .link-box{margin-bottom:6px}
+.keep-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:14px}
+.keep{display:inline-flex;align-items:center;gap:8px}
+.keep svg{width:20px;height:20px;flex:none}
 .linkrow{display:flex;gap:8px;flex-wrap:wrap}
 .linkrow input{flex:1 1 220px;min-width:0}
 .or{display:flex;align-items:center;gap:12px;color:var(--muted);font-weight:800;margin:18px 0 14px}
@@ -374,7 +377,9 @@ function openRecipe(id){
       ${r.intro?`<p class="intro">${esc(r.intro)}</p>`:""}
       <div class="facts">${fact("זמן",r.time)}${fact("כמות",r.servings)}${fact("מצרכים",(r.ingredients||[]).filter(t=>!/[:：]$/.test(t)).length||"")}</div>
       <div class="recipe-body">
-        <section><div class="h4">מצרכים</div><div class="index"><ul class="ing">${ing||"<li>—</li>"}</ul></div></section>
+        <section><div class="h4">מצרכים</div><div class="index"><ul class="ing">${ing||"<li>—</li>"}</ul></div>
+          ${(r.ingredients||[]).length?`<div class="keep-row"><button class="btn ghost keep" id="keep" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#f6b400" d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path fill="#fff" d="M12 7a4 4 0 0 0-2.2 7.3V16h4.4v-1.7A4 4 0 0 0 12 7zm-2 10h4v1.2a.8.8 0 0 1-.8.8h-2.4a.8.8 0 0 1-.8-.8z"/></svg>יצירת רשימה ב-Keep</button><span class="hint live" id="keepMsg" aria-live="polite"></span></div>`:""}
+        </section>
         <section><div class="h4">ההכנה</div><ol class="steps" id="steps">${steps||"<li>—</li>"}</ol></section>
       </div>
       ${r.notes?`<div class="notes">${esc(r.notes)}</div>`:""}
@@ -382,11 +387,28 @@ function openRecipe(id){
       <div class="row-btns"><button class="btn ghost" id="cook">מסך דלוק בזמן בישול</button><button class="btn ghost" id="edit">עריכה</button><span id="delWrap"><button class="btn ghost" id="del">מחיקה</button></span></div></div>
     </div>`);
   $("#steps").onclick=e=>{const li=e.target.closest("li");if(li)li.classList.toggle("done");};
+  if($("#keep"))$("#keep").onclick=()=>toKeep(r);
   $("#edit").onclick=()=>openForm(r);
   $("#del").onclick=()=>{$("#delWrap").innerHTML=`<span class="row-btns">למחוק לצמיתות? <button class="btn warn" id="yes">מחיקה</button><button class="btn ghost" id="no">ביטול</button></span>`;
     $("#no").onclick=()=>openRecipe(id);
     $("#yes").onclick=async()=>{try{await api("DELETE",null,id);recipes=recipes.filter(x=>x.id!==id);closeModal();render();}catch(e){$("#delWrap").innerHTML=`<span class="err">המחיקה נכשלה. נסו שוב.</span>`;}};};
   $("#cook").onclick=async()=>{try{wakeLock=await navigator.wakeLock.request("screen");$("#cook").textContent="המסך יישאר דלוק ✓";$("#cook").disabled=true;}catch{$("#cook").textContent="הדפדפן לא מאפשר";$("#cook").disabled=true;}};
+}
+/* Shopping list for Google Keep. Keep has no web API, so on phones the list goes through the
+   share sheet (choose Keep there); elsewhere it is copied and Keep opens in a new tab to paste into. */
+async function toKeep(r){
+  const items=(r.ingredients||[]).filter(t=>!/[:：]$/.test(t));
+  const title=`קניות: ${r.title}`;
+  const text=items.join("\n");
+  const msg=$("#keepMsg");
+  if(navigator.share&&matchMedia("(pointer:coarse)").matches){
+    try{await navigator.share({title,text:`${title}\n${text}`});msg.textContent="בחרו Keep בחלון השיתוף. ב-Keep אפשר להפוך את הפתק לרשימה עם תיבות סימון מתפריט ⋮.";return;}
+    catch(e){if(e.name==="AbortError")return;}
+  }
+  let copied=false;
+  try{await navigator.clipboard.writeText(`${title}\n${text}`);copied=true;}catch{}
+  window.open("https://keep.google.com/#home","_blank","noopener");
+  msg.textContent=copied?"הרשימה הועתקה. ב-Keep פתחו פתק חדש והדביקו (Ctrl+V). אפשר להפוך אותו לרשימה עם תיבות סימון מתפריט ⋮.":"לא הצלחתי להעתיק. סמנו את המצרכים, העתיקו והדביקו בפתק חדש ב-Keep.";
 }
 function releaseWake(){try{wakeLock&&wakeLock.release();}catch{}wakeLock=null;}
 function shortUrl(u){try{return new URL(u).hostname.replace(/^www\./,"");}catch{return u;}}
