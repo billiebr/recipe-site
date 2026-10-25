@@ -191,6 +191,16 @@ img{max-width:100%}
 .login h1{font-size:clamp(3.4rem,14vw,4.6rem)}
 .login p{margin:0;color:var(--muted)}
 .link-box{margin-bottom:6px}
+.chip.fav b{display:inline-flex;align-items:center;gap:5px}
+.chip.fav svg{width:1em;height:1em;fill:currentColor}
+.star-badge{position:absolute;top:10px;left:12px;width:30px;height:30px;border-radius:50%;background:var(--t);display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.2)}
+.star-badge svg{width:19px;height:19px;fill:#e0a400}
+.star-btn{position:absolute;top:14px;left:62px;width:40px;height:40px;border-radius:50%;border:0;background:rgba(0,0,0,.25);cursor:pointer;display:grid;place-items:center;z-index:2;transition:transform .15s}
+.star-btn svg{width:22px;height:22px;fill:none;stroke:#fff;stroke-width:1.8;stroke-linejoin:round}
+.star-btn.on{background:#fff}
+.star-btn.on svg{fill:#e0a400;stroke:#e0a400}
+.star-btn:hover{transform:scale(1.08)}
+.star-btn:disabled{opacity:.7}
 .keep-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:14px}
 .keep{display:inline-flex;align-items:center;gap:8px}
 .keep svg{width:20px;height:20px;flex:none}
@@ -301,10 +311,12 @@ function allCats(){const extra=[...new Set(recipes.map(r=>r.category).filter(c=>
 const byNew=(a,b)=>(b.createdAt||0)-(a.createdAt||0);
 const catOf=r=>r.category||"שונות";
 
+const FAV="__fav", STAR=`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3 6.1 20.6l1.3-6.6L2.5 9.4l6.6-.8z"/></svg>`;
+const catLabel=c=>c===FAV?"מועדפים":c;
 function card(r,ts){
   const hit=ts.length?hitLine(r,ts):"";
   return `<button class="card" data-id="${esc(r.id)}">
-    <div class="head" style="${headVars(r.category)}"><span class="glyph" aria-hidden="true">${esc(initial(r.title))}</span><span class="lbl">${esc(catOf(r))}</span></div>
+    <div class="head" style="${headVars(r.category)}"><span class="glyph" aria-hidden="true">${esc(initial(r.title))}</span><span class="lbl">${esc(catOf(r))}</span>${r.fav?`<span class="star-badge" title="מועדף">${STAR}</span>`:""}</div>
     <div class="body"><h3${isVegan(r)?' class="vegan" title="טבעוני"':""}>${hl(r.title,ts)}</h3>${hit||(r.intro?`<p>${hl(r.intro,ts)}</p>`:"")}
     <div class="meta">${r.time?`<span>${esc(r.time.replace(/\s*\(.*\)/,""))}</span>`:""}${r.servings?`<span>${esc(r.servings)}</span>`:""}${r.author?`<span>${esc(r.author)}</span>`:""}</div></div></button>`;
 }
@@ -314,22 +326,23 @@ function render(){
   const pool=ts.length?recipes.filter(r=>matches(r,ts)):recipes;
   const counts={};pool.forEach(r=>{const c=catOf(r);counts[c]=(counts[c]||0)+1;});
   const cats=Object.keys(counts).sort((a,b)=>catOrder(a)-catOrder(b)||a.localeCompare(b,"he"));
-  if(cat!=="הכל"&&!cats.includes(cat)&&!ts.length&&recipes.length)cat="הכל";
-  const shelfCats=ts.length?(cats.includes(cat)||cat==="הכל"?cats:[...cats,cat]):allCats().filter(c=>counts[c]||CATS.includes(c));
-  $("#tabs").innerHTML=[`<button class="chip ${cat==="הכל"?"on":""}" data-cat="הכל" aria-pressed="${cat==="הכל"}" style="--c:var(--ink);--t:var(--paper)"><b>הכל</b><span class="n">${pool.length}</span></button>`]
+  if(cat!=="הכל"&&cat!==FAV&&!cats.includes(cat)&&!ts.length&&recipes.length)cat="הכל";
+  const shelfCats=ts.length?(cats.includes(cat)||cat==="הכל"||cat===FAV?cats:[...cats,cat]):allCats().filter(c=>counts[c]||CATS.includes(c));
+  $("#tabs").innerHTML=[`<button class="chip ${cat==="הכל"?"on":""}" data-cat="הכל" aria-pressed="${cat==="הכל"}" style="--c:var(--ink);--t:var(--paper)"><b>הכל</b><span class="n">${pool.length}</span></button>`,
+    `<button class="chip fav ${cat===FAV?"on":""} ${pool.some(r=>r.fav)?"":"zero"}" data-cat="${FAV}" aria-pressed="${cat===FAV}" style="--c:#d99a00;--t:#2b1d30"><b>${STAR}מועדפים</b><span class="n">${pool.filter(r=>r.fav).length}</span></button>`]
     .concat(shelfCats.map(c=>{const[bg,fg]=styleOf(c);return `<button class="chip ${c===cat?"on":""} ${counts[c]?"":"zero"}" data-cat="${esc(c)}" aria-pressed="${c===cat}" style="--c:${bg};--t:${fg}"><b>${esc(c)}</b><span class="n">${counts[c]||0}</span></button>`;})).join("");
   const nCats=new Set(recipes.map(catOf)).size;
   $("#count").textContent=recipes.length?`${recipes.length} מתכונים · ${nCats} קטגוריות`:(ready?"הספר מחכה למתכון הראשון":$("#count").textContent);
   $("#clr").hidden=!query;$("#kbd").hidden=!!query;
 
-  let list=pool.filter(r=>cat==="הכל"||catOf(r)===cat);
+  let list=pool.filter(r=>cat==="הכל"||(cat===FAV?r.fav:catOf(r)===cat));
   if(ts.length)list.sort((a,b)=>(ts.every(t=>b._t.includes(t))-ts.every(t=>a._t.includes(t)))||byNew(a,b));else list.sort(byNew);
 
   const rl=$("#resultLine");
   if(ts.length){
-    const inCat=cat==="הכל"?"":` בקטגוריה ${esc(cat)}`;
+    const inCat=cat==="הכל"?"":` בקטגוריה ${esc(catLabel(cat))}`;
     rl.innerHTML=list.length?`נמצאו <b>${list.length}</b> מתכונים עבור ״${esc(query.trim())}״${inCat}`:`לא נמצאו מתכונים עבור ״${esc(query.trim())}״${inCat}`;
-  }else rl.innerHTML=cat==="הכל"?"":`מציג <b>${list.length}</b> מתכונים בקטגוריה ${esc(cat)}`;
+  }else rl.innerHTML=cat==="הכל"?"":`מציג <b>${list.length}</b> מתכונים בקטגוריה ${esc(catLabel(cat))}`;
   rl.hidden=!rl.innerHTML;
 
   const g=$("#grid");
@@ -338,7 +351,7 @@ function render(){
   }
   if(!list.length){
     const elsewhere=ts.length&&cat!=="הכל"&&pool.length;
-    g.innerHTML=`<div class="empty"><strong>${ts.length?"לא מצאתי":"עוד אין כאן כלום"}</strong>${elsewhere?`יש ${pool.length} תוצאות בקטגוריות אחרות.<br><button class="btn" data-cat="הכל" style="margin-top:14px">חיפוש בכל הקטגוריות</button>`:ts.length?"נסו מילה אחרת, או חלק ממילה (למשל ״עוג״ במקום ״עוגיות״).":"בחרו קטגוריה אחרת, או הוסיפו מתכון חדש."}</div>`;return;
+    g.innerHTML=`<div class="empty"><strong>${ts.length?"לא מצאתי":cat===FAV?"עוד אין מועדפים":"עוד אין כאן כלום"}</strong>${elsewhere?`יש ${pool.length} תוצאות בקטגוריות אחרות.<br><button class="btn" data-cat="הכל" style="margin-top:14px">חיפוש בכל הקטגוריות</button>`:ts.length?"נסו מילה אחרת, או חלק ממילה (למשל ״עוג״ במקום ״עוגיות״).":cat===FAV?"פתחו מתכון ולחצו על הכוכב שבראש הדף כדי להוסיף אותו למועדפים.":"בחרו קטגוריה אחרת, או הוסיפו מתכון חדש."}</div>`;return;
   }
   if(cat==="הכל"&&!ts.length){
     g.innerHTML=cats.map(c=>{const rs=list.filter(r=>catOf(r)===c);const[bg]=styleOf(c);
@@ -372,6 +385,7 @@ function openRecipe(id){
   const steps=(r.steps||[]).map(t=>`<li><span>${hl(t,ts)}</span></li>`).join("");
   const fact=(k,v)=>v?`<div><small>${k}</small><b>${esc(v)}</b></div>`:"";
   shell(`<div class="head" style="${headVars(r.category)}"><span class="glyph" aria-hidden="true">${esc(initial(r.title))}</span>
+      <button class="star-btn ${r.fav?"on":""}" id="fav" type="button" aria-pressed="${!!r.fav}" aria-label="${r.fav?"הסרה מהמועדפים":"הוספה למועדפים"}" title="${r.fav?"הסרה מהמועדפים":"הוספה למועדפים"}">${STAR}</button>
       <span class="lbl">${esc(r.category||"שונות")}</span><h2${isVegan(r)?' class="vegan" title="טבעוני"':""}>${esc(r.title)}</h2>${r.author?`<div class="byline">מאת ${esc(r.author)}</div>`:""}</div>
     <div class="inner" style="--cat:${bg}">
       ${r.intro?`<p class="intro">${esc(r.intro)}</p>`:""}
@@ -388,12 +402,26 @@ function openRecipe(id){
     </div>`);
   $("#steps").onclick=e=>{const li=e.target.closest("li");if(li)li.classList.toggle("done");};
   if($("#keep"))$("#keep").onclick=()=>toKeep(r);
+  $("#fav").onclick=()=>toggleFav(r);
   $("#edit").onclick=()=>openForm(r);
   $("#del").onclick=()=>{$("#delWrap").innerHTML=`<span class="row-btns">למחוק לצמיתות? <button class="btn warn" id="yes">מחיקה</button><button class="btn ghost" id="no">ביטול</button></span>`;
     $("#no").onclick=()=>openRecipe(id);
     $("#yes").onclick=async()=>{try{await api("DELETE",null,id);recipes=recipes.filter(x=>x.id!==id);closeModal();render();}catch(e){$("#delWrap").innerHTML=`<span class="err">המחיקה נכשלה. נסו שוב.</span>`;}};};
   $("#cook").onclick=async()=>{try{wakeLock=await navigator.wakeLock.request("screen");$("#cook").textContent="המסך יישאר דלוק ✓";$("#cook").disabled=true;}catch{$("#cook").textContent="הדפדפן לא מאפשר";$("#cook").disabled=true;}};
 }
+/* Favourites: the star in the recipe page. Saved with the recipe, so it shows on every device. */
+async function toggleFav(r){
+  const btn=$("#fav"),next=!r.fav;
+  const paint=on=>{btn.classList.toggle("on",on);btn.setAttribute("aria-pressed",on);const t=on?"הסרה מהמועדפים":"הוספה למועדפים";btn.title=t;btn.setAttribute("aria-label",t);};
+  paint(next);btn.disabled=true;
+  try{
+    const {_t,_all,...plain}=r;
+    const {recipe}=await api("POST",{...plain,fav:next});
+    Object.assign(r,index(recipe));render();
+  }catch(e){paint(!next);alertSoft(e.message);}
+  finally{btn.disabled=false;}
+}
+function alertSoft(msg){const m=$("#keepMsg");if(m)m.textContent=msg;}
 /* Shopping list for Google Keep. Keep has no web API, so on phones the list goes through the
    share sheet (choose Keep there); elsewhere it is copied and Keep opens in a new tab to paste into. */
 async function toKeep(r){
