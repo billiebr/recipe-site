@@ -5,6 +5,7 @@ import { getStore } from "@netlify/blobs";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { json, checkPassword } from "../lib/auth.mjs";
+import { PHOTO_ID, deletePhoto } from "../lib/photos.mjs";
 
 const FIELDS = ["title", "category", "time", "servings", "author", "source", "intro", "notes"];
 function clean(input, prev = {}) {
@@ -16,6 +17,9 @@ function clean(input, prev = {}) {
     if (typeof input[f] === "boolean") r[f] = input[f];
     else if (typeof prev[f] === "boolean") r[f] = prev[f];
   }
+  // photo: a stored photo id, "" to remove it, or left out to keep the saved one.
+  if (typeof input.photo === "string" && (input.photo === "" || PHOTO_ID.test(input.photo))) { if (input.photo) r.photo = input.photo; }
+  else if (prev.photo) r.photo = prev.photo;
   r.createdAt = Number(prev.createdAt || input.createdAt) || Date.now();
   r.updatedAt = Date.now();
   return r;
@@ -64,13 +68,16 @@ export default async (req) => {
     const prev = (await store.get("r/" + id, { type: "json" })) || {};
     const recipe = clean(body, prev);
     await store.setJSON("r/" + id, recipe);
+    if (prev.photo && prev.photo !== recipe.photo) await deletePhoto(prev.photo);
     return json({ recipe: { id, ...recipe } });
   }
 
   if (req.method === "DELETE") {
     const id = url.searchParams.get("id") || "";
     if (!/^[\w-]{1,80}$/.test(id)) return json({ error: "bad_id" }, 400);
+    const prev = await store.get("r/" + id, { type: "json" });
     await store.delete("r/" + id);
+    if (prev?.photo) await deletePhoto(prev.photo);
     return json({ ok: true });
   }
 

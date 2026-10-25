@@ -201,6 +201,17 @@ img{max-width:100%}
 .star-btn.on svg{fill:#e0a400;stroke:#e0a400}
 .star-btn:hover{transform:scale(1.08)}
 .star-btn:disabled{opacity:.7}
+.head.has-photo{background-size:cover;background-position:center}
+.head.has-photo::before,.head.has-photo .glyph{display:none}
+.sheet .head.has-photo{min-height:300px}
+.sheet .head.has-photo h2,.sheet .head.has-photo .byline{text-shadow:0 2px 14px rgba(0,0,0,.55)}
+.lbl-like{font-weight:800;font-size:.92rem}
+.photo-field{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.photo-prev{width:120px;height:90px;border-radius:10px;border:2px dashed var(--line);background:var(--card) center/cover no-repeat;display:grid;place-items:center;color:var(--muted);flex:none}
+.photo-prev[style*="url"]{border-style:solid}
+.photo-prev svg{width:34px;height:34px}
+.photo-btns{display:flex;gap:8px;flex-wrap:wrap}
+.photo-btns label.btn{cursor:pointer}
 .keep-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:14px}
 .keep{display:inline-flex;align-items:center;gap:8px}
 .keep svg{width:20px;height:20px;flex:none}
@@ -311,12 +322,25 @@ function allCats(){const extra=[...new Set(recipes.map(r=>r.category).filter(c=>
 const byNew=(a,b)=>(b.createdAt||0)-(a.createdAt||0);
 const catOf=r=>r.category||"שונות";
 
+const CAM=`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l2-2.5h6L17 7h3a1.5 1.5 0 0 1 1.5 1.5v10A1.5 1.5 0 0 1 20 20H4a1.5 1.5 0 0 1-1.5-1.5v-10A1.5 1.5 0 0 1 4 7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>`;
+const photoUrl=(id,small)=>`/api/photo/${encodeURIComponent(id)}${small?"?s=thumb":""}`;
+const photoStyle=(r,small)=>r.photo?`;background-image:linear-gradient(to top,rgba(0,0,0,.55),rgba(0,0,0,0) ${small?"60%":"75%"}),url('${photoUrl(r.photo,small)}');color:#fff`:"";
+/* Shrinks a picked photo to at most `max` pixels on its long side and returns base64 JPEG. */
+async function shrink(file,max,quality){
+  let img;
+  try{img=await createImageBitmap(file,{imageOrientation:"from-image"});}
+  catch{img=await new Promise((ok,bad)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=bad;i.src=URL.createObjectURL(file);});}
+  const w=img.width,h=img.height,k=Math.min(1,max/Math.max(w,h));
+  const c=document.createElement("canvas");c.width=Math.round(w*k);c.height=Math.round(h*k);
+  const g=c.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0,c.width,c.height);
+  return c.toDataURL("image/jpeg",quality).split(",")[1];
+}
 const FAV="__fav", STAR=`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3 6.1 20.6l1.3-6.6L2.5 9.4l6.6-.8z"/></svg>`;
 const catLabel=c=>c===FAV?"מועדפים":c;
 function card(r,ts){
   const hit=ts.length?hitLine(r,ts):"";
   return `<button class="card" data-id="${esc(r.id)}">
-    <div class="head" style="${headVars(r.category)}"><span class="glyph" aria-hidden="true">${esc(initial(r.title))}</span><span class="lbl">${esc(catOf(r))}</span>${r.fav?`<span class="star-badge" title="מועדף">${STAR}</span>`:""}</div>
+    <div class="head${r.photo?" has-photo":""}" style="${headVars(r.category)}${photoStyle(r,true)}"><span class="glyph" aria-hidden="true">${esc(initial(r.title))}</span><span class="lbl">${esc(catOf(r))}</span>${r.fav?`<span class="star-badge" title="מועדף">${STAR}</span>`:""}</div>
     <div class="body"><h3${isVegan(r)?' class="vegan" title="טבעוני"':""}>${hl(r.title,ts)}</h3>${hit||(r.intro?`<p>${hl(r.intro,ts)}</p>`:"")}
     <div class="meta">${r.time?`<span>${esc(r.time.replace(/\s*\(.*\)/,""))}</span>`:""}${r.servings?`<span>${esc(r.servings)}</span>`:""}${r.author?`<span>${esc(r.author)}</span>`:""}</div></div></button>`;
 }
@@ -384,7 +408,7 @@ function openRecipe(id){
   const ing=(r.ingredients||[]).map((t,i)=>/[:：]$/.test(t)?`<li class="grp">${esc(t.replace(/[:：]$/,""))}</li>`:`<li><label><input type="checkbox" id="ing${i}"><span>${hl(t,ts)}</span></label></li>`).join("");
   const steps=(r.steps||[]).map(t=>`<li><span>${hl(t,ts)}</span></li>`).join("");
   const fact=(k,v)=>v?`<div><small>${k}</small><b>${esc(v)}</b></div>`:"";
-  shell(`<div class="head" style="${headVars(r.category)}"><span class="glyph" aria-hidden="true">${esc(initial(r.title))}</span>
+  shell(`<div class="head${r.photo?" has-photo":""}" style="${headVars(r.category)}${photoStyle(r,false)}"><span class="glyph" aria-hidden="true">${esc(initial(r.title))}</span>
       <button class="star-btn ${r.fav?"on":""}" id="fav" type="button" aria-pressed="${!!r.fav}" aria-label="${r.fav?"הסרה מהמועדפים":"הוספה למועדפים"}" title="${r.fav?"הסרה מהמועדפים":"הוספה למועדפים"}">${STAR}</button>
       <span class="lbl">${esc(r.category||"שונות")}</span><h2${isVegan(r)?' class="vegan" title="טבעוני"':""}>${esc(r.title)}</h2>${r.author?`<div class="byline">מאת ${esc(r.author)}</div>`:""}</div>
     <div class="inner" style="--cat:${bg}">
@@ -456,6 +480,11 @@ function openForm(r){
       <label><input type="radio" name="vegan" id="fVeganYes" class="v" value="1" ${(r.title||r.id)&&isVegan(r)?"checked":""}><span><i class="leaf" aria-hidden="true"></i>טבעוני</span></label>
       <label><input type="radio" name="vegan" id="fVeganNo" value="0" ${(r.title||r.id)&&isVegan(r)?"":"checked"}><span>לא טבעוני</span></label>
     </div></fieldset>
+    <div class="f"><span class="lbl-like">תמונה</span>
+      <div class="photo-field"><div class="photo-prev" id="fPhotoPrev"${r.photo?` style="background-image:url('${photoUrl(r.photo,true)}')"`:""}>${r.photo?"":CAM}</div>
+        <div class="photo-btns"><label class="btn ghost" for="fPhoto">${r.photo?"החלפת תמונה":"העלאת תמונה"}</label><input type="file" id="fPhoto" accept="image/*" hidden>
+        <button class="btn ghost" type="button" id="fPhotoDel"${r.photo?"":" hidden"}>הסרה</button></div></div>
+      <span id="phMsg" class="hint live" aria-live="polite"></span></div>
     <div class="row"><div class="f"><label for="fCat">קטגוריה</label><select id="fCat">${catOpts}</select><input id="fCatNew" placeholder="שם הקטגוריה" hidden></div>
       <div class="f"><label for="fTime">זמן</label><input id="fTime" value="${esc(r.time)}" placeholder="45 דקות"></div>
       <div class="f"><label for="fServ">כמות</label><input id="fServ" value="${esc(r.servings)}" placeholder="4 מנות"></div></div>
@@ -478,6 +507,18 @@ function openForm(r){
     $("#fUrl").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();read();}};
     $("#fUrl").focus();
   }
+  // photo: keep the saved one, replace it with a newly picked file, or remove it.
+  let photo=r.photo||"", picked=null;
+  $("#fPhoto").onchange=async e=>{
+    const file=e.target.files[0];if(!file)return;
+    $("#phMsg").textContent="מכין את התמונה…";
+    try{
+      picked={full:await shrink(file,1400,.82),thumb:await shrink(file,520,.78)};
+      $("#fPhotoPrev").style.backgroundImage=`url(data:image/jpeg;base64,${picked.thumb})`;$("#fPhotoPrev").innerHTML="";
+      $("#fPhotoDel").hidden=false;$("#phMsg").textContent="התמונה תישמר כשתלחצו ״שמירה בספר״.";
+    }catch{picked=null;$("#phMsg").textContent="לא הצלחתי לקרוא את התמונה. נסו תמונה אחרת (JPG או PNG).";}
+  };
+  $("#fPhotoDel").onclick=()=>{photo="";picked=null;$("#fPhoto").value="";$("#fPhotoPrev").style.backgroundImage="";$("#fPhotoPrev").innerHTML=CAM;$("#fPhotoDel").hidden=true;$("#phMsg").textContent="";};
   $("#fCat").onchange=e=>{$("#fCatNew").hidden=e.target.value!=="__new";};
   if(r.category&&!allCats().includes(r.category)){$("#fCat").value="__new";$("#fCatNew").hidden=false;$("#fCatNew").value=r.category;}
   $("#mf").onsubmit=async e=>{
@@ -486,7 +527,10 @@ function openForm(r){
     const data={id:r.id,title:$("#fTitle").value.trim(),category:c,time:$("#fTime").value.trim(),servings:$("#fServ").value.trim(),author:$("#fAuthor").value.trim(),
       source:$("#fSrc").value.trim(),intro:$("#fIntro").value.trim(),ingredients:lines($("#fIng").value),steps:lines($("#fSteps").value),notes:$("#fNotes").value.trim(),vegan:$("#fVeganYes").checked,createdAt:r.createdAt};
     $("#save").disabled=true;$("#sMsg").textContent="";
-    try{const {recipe}=await api("POST",data);
+    try{
+      if(picked){$("#sMsg").textContent="מעלה את התמונה…";photo=(await api("POST",picked,null,"/api/photo")).photo;picked=null;$("#sMsg").textContent="";}
+      data.photo=photo;
+      const {recipe}=await api("POST",data);
       recipes=recipes.filter(x=>x.id!==recipe.id).concat(index(recipe));cat=c;render();openRecipe(recipe.id);}
     catch(err){$("#save").disabled=false;$("#sMsg").textContent=err.message;}
   };
