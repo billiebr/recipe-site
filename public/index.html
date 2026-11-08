@@ -212,20 +212,8 @@ img{max-width:100%}
 .photo-prev svg{width:34px;height:34px}
 .photo-btns{display:flex;gap:8px;flex-wrap:wrap}
 .photo-btns label.btn{cursor:pointer}
-.reels-btn{display:inline-flex;align-items:center;gap:8px}
-.reels-btn svg{width:20px;height:20px;flex:none}
-.reel-form{margin-bottom:18px}
-.reel-tabs{margin:0 0 14px}
-.reel-list{display:flex;flex-direction:column;gap:12px}
-.reel{background:var(--card);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px;display:flex;flex-direction:column;gap:8px}
-.reel.is-done{opacity:.7}
-.reel-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.plat{font-size:.8rem;font-weight:800;padding:3px 10px;border-radius:999px;background:var(--soft);color:var(--ink)}
-.plat.ig{background:#e1306c;color:#fff}.plat.tt{background:#111;color:#fff}.plat.yt{background:#e62117;color:#fff}.plat.fb{background:#1877f2;color:#fff}
-.reel-note{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
-.reel-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.reel-actions a.btn{text-decoration:none;display:inline-flex;align-items:center}
-@media (max-width:760px){.tools{flex-wrap:wrap}.reels-btn{order:2}}
+.video-note{margin-top:14px;font-size:.95rem}
+.watch{text-decoration:none!important;display:inline-flex;align-items:center;gap:6px}
 .keep-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:14px}
 .keep{display:inline-flex;align-items:center;gap:8px}
 .keep svg{width:20px;height:20px;flex:none}
@@ -254,7 +242,7 @@ img{max-width:100%}
       <h1>ספר המתכונים<span class="dot">.</span></h1>
       <div class="stats" id="count">טוען מתכונים…</div>
     </div>
-    <div class="tools"><button id="reelsBtn" class="btn ghost big reels-btn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 8.5h18M8 3.5l3 5M14 3.5l3 5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 12.2v5.6l4.6-2.8z" fill="currentColor"/></svg>רעיונות לרילז</button><button id="addBtn" class="btn big">+ מתכון חדש</button></div>
+    <div class="tools"><button id="addBtn" class="btn big">+ מתכון חדש</button></div>
   </header>
   <div class="bar">
     <div class="searchbox">
@@ -407,7 +395,6 @@ $("#clr").onclick=clearSearch;
 document.addEventListener("keydown",e=>{if(e.key==="/"&&!$("#ov")&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){e.preventDefault();$("#q").focus();}});
 $("#grid").addEventListener("click",e=>{const b=e.target.closest(".card");if(b)openRecipe(b.dataset.id);});
 $("#addBtn").onclick=()=>openForm(null);
-$("#reelsBtn").onclick=()=>openReels();
 
 function closeModal(){$("#modal").innerHTML="";releaseWake();document.body.style.overflow="";}
 function shell(html){
@@ -436,13 +423,12 @@ function openRecipe(id){
         <section><div class="h4">ההכנה</div><ol class="steps" id="steps">${steps||"<li>—</li>"}</ol></section>
       </div>
       ${r.notes?`<div class="notes">${esc(r.notes)}</div>`:""}
-      <div class="sheet-foot"><div>${r.source?`מקור: <a href="${esc(r.source)}" target="_blank" rel="noopener">${esc(shortUrl(r.source))}</a>`:""}</div>
-      <div class="row-btns"><button class="btn ghost" id="recipeReels" type="button">${(()=>{const n=reels.filter(x=>x.recipeId===r.id).length;return n?`רילז למתכון (${n})`:"+ רעיון לרילז";})()}</button><button class="btn ghost" id="cook">מסך דלוק בזמן בישול</button><button class="btn ghost" id="edit">עריכה</button><span id="delWrap"><button class="btn ghost" id="del">מחיקה</button></span></div></div>
+      <div class="sheet-foot"><div>${r.source?(isVideo(r.source)?`<a class="btn ghost watch" href="${esc(r.source)}" target="_blank" rel="noopener">▶ צפייה ברילז</a>`:`מקור: <a href="${esc(r.source)}" target="_blank" rel="noopener">${esc(shortUrl(r.source))}</a>`):""}</div>
+      <div class="row-btns"><button class="btn ghost" id="cook">מסך דלוק בזמן בישול</button><button class="btn ghost" id="edit">עריכה</button><span id="delWrap"><button class="btn ghost" id="del">מחיקה</button></span></div></div>
     </div>`);
   $("#steps").onclick=e=>{const li=e.target.closest("li");if(li)li.classList.toggle("done");};
   if($("#keep"))$("#keep").onclick=()=>toKeep(r);
   $("#fav").onclick=()=>toggleFav(r);
-  $("#recipeReels").onclick=()=>openReels({recipeId:r.id});
   $("#edit").onclick=()=>openForm(r);
   $("#del").onclick=()=>{$("#delWrap").innerHTML=`<span class="row-btns">למחוק לצמיתות? <button class="btn warn" id="yes">מחיקה</button><button class="btn ghost" id="no">ביטול</button></span>`;
     $("#no").onclick=()=>openRecipe(id);
@@ -479,17 +465,20 @@ async function toKeep(r){
   msg.textContent=copied?"הרשימה הועתקה. ב-Keep פתחו פתק חדש והדביקו (Ctrl+V). אפשר להפוך אותו לרשימה עם תיבות סימון מתפריט ⋮.":"לא הצלחתי להעתיק. סמנו את המצרכים, העתיקו והדביקו בפתק חדש ב-Keep.";
 }
 function releaseWake(){try{wakeLock&&wakeLock.release();}catch{}wakeLock=null;}
+const isVideo=u=>{try{return /(^|\.)(instagram\.com|tiktok\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch)$/.test(new URL(u).hostname);}catch{return false;}};
 function shortUrl(u){try{return new URL(u).hostname.replace(/^www\./,"");}catch{return u;}}
 
 function openForm(r){
   const isNew=!r||!r.id; const fromLink=isNew&&!!(r&&r.title); r=r||{};
   const catOpts=allCats().map(c=>`<option ${c===r.category?"selected":""}>${esc(c)}</option>`).join("")+`<option value="__new">קטגוריה חדשה…</option>`;
   const linkUI=isNew&&!fromLink?`<div class="callout link-box"><div class="f"><label for="fUrl">הוספה מלינק</label>
-      <span class="hint">מדביקים לינק לדף המתכון, והספר ממלא את כל השדות ובוחר קטגוריה. אחר כך רק בודקים ושומרים.</span>
-      <div class="linkrow"><input id="fUrl" type="url" dir="ltr" inputmode="url" placeholder="https://" autocomplete="off"><button class="btn" id="readUrl" type="button">קרא את המתכון</button></div>
+      <span class="hint">מדביקים לינק לדף מתכון או לרילז (אינסטגרם, טיקטוק, יוטיוב, פייסבוק), והספר שולף את המתכון, ממלא את השדות ובוחר קטגוריה. אחר כך רק בודקים ושומרים.</span>
+      <div class="linkrow"><input id="fUrl" type="url" dir="ltr" inputmode="url" placeholder="https://… או לינק לרילז" autocomplete="off"><button class="btn" id="readUrl" type="button">קרא את המתכון</button></div>
       <span id="uMsg" class="hint live" aria-live="polite"></span></div></div>
     <div class="or">או מלאו בעצמכם</div>`:"";
-  shell(`<div class="form-head"><h2>${!isNew?"עריכת מתכון":fromLink?"בדקו ושמרו":"מתכון חדש"}</h2></div>
+  const videoNote=fromLink&&isVideo(r.source)&&!(r.ingredients||[]).length&&!(r.steps||[]).length
+    ?`<div class="callout video-note">לא מצאתי בכיתוב חלוקה ברורה למצרכים ולשלבים, אז כל הכיתוב נמצא בשדה ״הערות״. העבירו את השורות למקום הנכון ושמרו.</div>`:"";
+  shell(`<div class="form-head"><h2>${!isNew?"עריכת מתכון":fromLink?"בדקו ושמרו":"מתכון חדש"}</h2>${videoNote}</div>
     <div class="inner">${linkUI}<form class="form" id="mf">
     <div class="f"><label for="fTitle">שם המתכון</label><input id="fTitle" required value="${esc(r.title)}"></div>
     <fieldset class="toggle"><legend>טבעוני?</legend><div class="opts">
@@ -504,7 +493,7 @@ function openForm(r){
     <div class="row"><div class="f"><label for="fCat">קטגוריה</label><select id="fCat">${catOpts}</select><input id="fCatNew" placeholder="שם הקטגוריה" hidden></div>
       <div class="f"><label for="fTime">זמן</label><input id="fTime" value="${esc(r.time)}" placeholder="45 דקות"></div>
       <div class="f"><label for="fServ">כמות</label><input id="fServ" value="${esc(r.servings)}" placeholder="4 מנות"></div></div>
-    <div class="row"><div class="f"><label for="fAuthor">מאת</label><input id="fAuthor" value="${esc(r.author)}"></div>
+    <div class="row"><div class="f"><label for="fAuthor">מאת</label><input id="fAuthor" dir="auto" value="${esc(r.author)}"></div>
       <div class="f"><label for="fSrc">לינק למקור</label><input id="fSrc" dir="ltr" value="${esc(r.source)}"></div></div>
     <div class="f"><label for="fIntro">תיאור קצר</label><textarea id="fIntro" style="min-height:60px">${esc(r.intro)}</textarea></div>
     <div class="f"><label for="fIng">מצרכים</label><span class="hint">שורה לכל מצרך. שורה שמסתיימת בנקודתיים היא כותרת של קבוצה, למשל ״לרוטב:״</span><textarea id="fIng" style="min-height:170px">${esc((r.ingredients||[]).join("\n"))}</textarea></div>
@@ -552,73 +541,9 @@ function openForm(r){
   };
 }
 
-/* Reel ideas: saved links to reels, each with a note, an optional recipe and a "filmed" mark. */
-let reels=[], reelTab="todo";
-async function loadReels(){try{reels=(await api("GET",null,null,"/api/reels")).reels;}catch{}}
-function platform(u){
-  let h="";try{h=new URL(u).hostname.replace(/^www\./,"");}catch{}
-  if(/instagram\.com$/.test(h))return ["אינסטגרם","ig"];
-  if(/tiktok\.com$/.test(h))return ["טיקטוק","tt"];
-  if(/youtube\.com$|youtu\.be$/.test(h))return ["יוטיוב","yt"];
-  if(/facebook\.com$|fb\.watch$/.test(h))return ["פייסבוק","fb"];
-  return [h||"לינק","other"];
-}
-async function openReels(opts={}){
-  if(!reels.length)await loadReels();
-  const recipeOpts=`<option value="">בלי מתכון</option>`+[...recipes].sort((a,b)=>a.title.localeCompare(b.title,"he")).map(r=>`<option value="${esc(r.id)}" ${r.id===opts.recipeId?"selected":""}>${esc(r.title)}</option>`).join("");
-  shell(`<div class="form-head"><h2>רעיונות לרילז</h2></div>
-    <div class="inner">
-      <form class="callout form reel-form" id="rf">
-        <div class="f"><label for="rUrl">לינק לרילז</label><input id="rUrl" type="url" dir="ltr" inputmode="url" placeholder="https://www.instagram.com/reel/…" required autocomplete="off"></div>
-        <div class="f"><label for="rNote">מה הרעיון?</label><textarea id="rNote" style="min-height:70px" placeholder="למשל: לצלם את שלב הקיפול מלמעלה, עם מוזיקה שקטה"></textarea></div>
-        <div class="f"><label for="rRecipe">מתכון קשור</label><select id="rRecipe">${recipeOpts}</select></div>
-        <div class="row-btns"><button class="btn" type="submit" id="rSave">שמירת רעיון</button><span class="err" id="rMsg"></span></div>
-      </form>
-      <div class="seg reel-tabs" role="tablist" id="reelTabs"></div>
-      <div id="reelList" class="reel-list"></div>
-    </div>`);
-  const draw=()=>{
-    const todo=reels.filter(x=>!x.done),done=reels.filter(x=>x.done);
-    $("#reelTabs").innerHTML=`<button type="button" data-t="todo" class="${reelTab==="todo"?"on":""}" aria-pressed="${reelTab==="todo"}">לעשות (${todo.length})</button><button type="button" data-t="done" class="${reelTab==="done"?"on":""}" aria-pressed="${reelTab==="done"}">צולם (${done.length})</button>`;
-    let list=(reelTab==="todo"?todo:done);
-    list=[...list].sort((a,b)=>(opts.recipeId?(b.recipeId===opts.recipeId)-(a.recipeId===opts.recipeId):0)||(b.createdAt||0)-(a.createdAt||0));
-    $("#reelList").innerHTML=list.length?list.map(x=>{
-      const [name,cls]=platform(x.url),rec=recipes.find(r=>r.id===x.recipeId);
-      return `<article class="reel ${x.done?"is-done":""}" data-id="${esc(x.id)}">
-        <div class="reel-top"><span class="plat ${cls}">${esc(name)}</span>${rec?`<button class="linkbtn" type="button" data-open="${esc(rec.id)}">${esc(rec.title)} ←</button>`:""}</div>
-        ${x.note?`<p class="reel-note">${esc(x.note)}</p>`:""}
-        <div class="reel-actions"><a class="btn ghost" href="${esc(x.url)}" target="_blank" rel="noopener">פתיחת הרילז</a>
-          <button class="btn ghost" type="button" data-done="${esc(x.id)}">${x.done?"החזרה לרשימה":"צולם ✓"}</button>
-          <span class="del-wrap"><button class="btn ghost" type="button" data-del="${esc(x.id)}">מחיקה</button></span></div>
-      </article>`;}).join(""):`<div class="empty"><strong>${reelTab==="todo"?"אין עדיין רעיונות":"עוד לא צילמת"}</strong>${reelTab==="todo"?"הדביקו למעלה לינק לרילז שמצא חן בעיניכם, עם כמה מילים על הרעיון.":"רעיונות שתסמנו ״צולם״ יופיעו כאן."}</div>`;
-  };
-  draw();
-  if(!opts.recipeId)$("#rUrl").focus();
-  $("#reelTabs").onclick=e=>{const b=e.target.closest("[data-t]");if(b){reelTab=b.dataset.t;draw();}};
-  $("#rf").onsubmit=async e=>{
-    e.preventDefault();$("#rSave").disabled=true;$("#rMsg").textContent="";
-    try{const {reel}=await api("POST",{url:$("#rUrl").value.trim(),note:$("#rNote").value,recipeId:$("#rRecipe").value},null,"/api/reels");
-      reels.push(reel);reelTab="todo";$("#rUrl").value="";$("#rNote").value="";$("#rRecipe").value=opts.recipeId||"";draw();}
-    catch(err){$("#rMsg").textContent=err.message;}
-    finally{$("#rSave").disabled=false;}
-  };
-  $("#reelList").onclick=async e=>{
-    const open=e.target.closest("[data-open]");if(open){openRecipe(open.dataset.open);return;}
-    const tog=e.target.closest("[data-done]");
-    if(tog){const x=reels.find(r=>r.id===tog.dataset.done);tog.disabled=true;
-      try{const {reel}=await api("POST",{...x,done:!x.done},null,"/api/reels");Object.assign(x,reel);draw();}catch(err){tog.disabled=false;tog.textContent=err.message;}return;}
-    const del=e.target.closest("[data-del]");
-    if(del){const wrap=del.parentElement,id=del.dataset.del;
-      wrap.innerHTML=`<span class="row-btns">למחוק? <button class="btn warn" type="button" data-yes="${esc(id)}">מחיקה</button><button class="btn ghost" type="button" data-no>ביטול</button></span>`;return;}
-    if(e.target.closest("[data-no]")){draw();return;}
-    const yes=e.target.closest("[data-yes]");
-    if(yes){yes.disabled=true;try{await api("DELETE",null,yes.dataset.yes,"/api/reels");reels=reels.filter(r=>r.id!==yes.dataset.yes);draw();}catch(err){yes.disabled=false;yes.textContent=err.message;}}
-  };
-}
-
 /* Talking to the site's API. The family password travels in a header; a 401 sends the viewer back to the login screen. */
 const IMPORT_ERRORS={bad_url:"זה לא נראה כמו לינק לאתר. בדקו שהוא מתחיל ב-https://",fetch_failed:"לא הצלחתי לפתוח את הדף. בדקו את הלינק, או מלאו את המתכון בעצמכם.",
-  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם.",busy:"הקריאה האוטומטית הגיעה למכסה היומית החינמית. נסו שוב מחר, או מלאו את המתכון בעצמכם.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
+  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם.",no_caption:"לא הצלחתי לקרוא את הכיתוב של הסרטון. אם הוא פרטי או שהאתר חסם את הקריאה, העתיקו את הכיתוב מהאפליקציה והדביקו אותו בשדות בעצמכם.",busy:"הקריאה האוטומטית הגיעה למכסה היומית החינמית. נסו שוב מחר, או מלאו את המתכון בעצמכם.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
 async function api(method,body,id,path="/api/recipes"){
   let res;
   try{res=await fetch(path+(id?`?id=${encodeURIComponent(id)}`:""),{method,headers:{"x-family-password":PW,...(body?{"content-type":"application/json"}:{})},body:body?JSON.stringify(body):undefined});}
@@ -639,8 +564,8 @@ async function enter(pw){
     if(!res.ok)throw new Error(out.error==="no_password_configured"?"עוד לא הוגדרה סיסמה משפחתית באתר.":"לא הצלחתי לטעון את הספר.");
     try{localStorage.setItem("recipes.pw",pw);}catch{}
     recipes=out.recipes.map(index);ready=true;
-    loadReels();
     $("#login").hidden=true;$("#app").hidden=false;render();
+    if(shared&&!enter.used){enter.used=true;openForm(null);$("#fUrl").value=shared;$("#readUrl").click();}
   }catch(e){showLogin(e.message||"אין חיבור לאינטרנט. נסו שוב.");}
   finally{$("#loginBtn").disabled=false;}
 }
@@ -648,6 +573,9 @@ $("#loginForm").onsubmit=e=>{e.preventDefault();enter($("#pw").value);};
 $("#logout").onclick=()=>{try{localStorage.removeItem("recipes.pw");}catch{}PW="";recipes=[];ready=false;$("#pw").value="";showLogin();};
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&ready)load().catch(()=>{});});
 
+/* Shared from another app (Android "Share" → ספר המתכונים): open a new recipe and read the link. */
+const shared=(()=>{const q=new URLSearchParams(location.search);const t=[q.get("url"),q.get("text"),q.get("title")].filter(Boolean).join(" ");
+  const m=t.match(/https?:\/\/[^\s"'<>]+/);if(t)history.replaceState(null,"",location.pathname);return m?m[0]:"";})();
 let saved="";try{saved=localStorage.getItem("recipes.pw")||"";}catch{}
 if(saved)enter(saved);else showLogin();
 </script>

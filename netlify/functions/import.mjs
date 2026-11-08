@@ -30,14 +30,14 @@ function checkUrl(raw) {
   return u;
 }
 
-async function fetchPage(u) {
+async function fetchPage(u, userAgent = "Mozilla/5.0 (compatible; FamilyRecipeBook/1.0)") {
   let res;
   try {
     res = await fetch(u, {
       redirect: "follow",
       signal: AbortSignal.timeout(FETCH_MS),
       headers: {
-        "user-agent": "Mozilla/5.0 (compatible; FamilyRecipeBook/1.0)",
+        "user-agent": userAgent,
         "accept": "text/html,application/xhtml+xml",
         "accept-language": "he,en;q=0.8",
       },
@@ -86,6 +86,98 @@ function pageText(html) {
   return { title, text: text.slice(0, MAX_TEXT_CHARS) };
 }
 
+// ---- reels and short videos ----
+// Many recipes live in the caption of an Instagram, TikTok, YouTube or Facebook video.
+// These sites hide the caption from ordinary page fetches, so each one is read the way
+// it publishes captions for link previews and embeds.
+const BROWSER_UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36";
+const PREVIEW_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)";
+const meta = (html, name) => decode((html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]+content=["']([^"']*)["']`, "i")) ||
+  html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']${name}["']`, "i")) || [])[1] || "");
+const lines = html => decode(String(html).replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "")).replace(/[ \t]+\n/g, "\n").trim();
+
+function platformOf(u) {
+  const h = u.hostname.replace(/^(www\.|m\.)/, "");
+  if (/(^|\.)instagram\.com$/.test(h)) return "instagram";
+  if (/(^|\.)tiktok\.com$/.test(h)) return "tiktok";
+  if (/(^|\.)youtube\.com$|^youtu\.be$/.test(h)) return "youtube";
+  if (/(^|\.)facebook\.com$|^fb\.watch$/.test(h)) return "facebook";
+  return null;
+}
+
+async function fetchJson(url) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_MS), headers: { "user-agent": BROWSER_UA } });
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+
+// Returns { platform, caption, author, title } or throws when the caption cannot be read.
+async function readVideo(u, platform) {
+  if (platform === "instagram") {
+    const code = (u.pathname.match(/\/(?:reels?|p|tv)\/([\w-]+)/) || [])[1];
+    if (code) {
+      // The embed page carries the full caption without a login.
+      const html = await fetchPage(new URL(`https://www.instagram.com/p/${code}/embed/captioned/`), BROWSER_UA).catch(() => "");
+      const m = html.match(/class=["']Caption["'][^>]*>([\s\S]*?)<div class=["']CaptionComments/i);
+      if (m) {
+        const author = plain((m[1].match(/class=["']CaptionUsername["'][^>]*>([\s\S]*?)<\/a>/i) || [])[1]);
+        const caption = lines(m[1].replace(/<a[^>]+class=["']CaptionUsername["'][\s\S]*?<\/a>/i, ""));
+        if (caption) return { platform, caption, author: author && `@${author}` };
+      }
+    }
+    const html = await fetchPage(u, PREVIEW_UA);
+    const d = meta(html, "og:description") || meta(html, "description");
+    // Preview text looks like: 1,234 likes, 56 comments - user on May 1, 2026: "caption"
+    const m = d.match(/^[\s\S]*?-\s*([\w.]+)[^:]*:\s*["“]([\s\S]*)["”]\.?\s*$/);
+    return { platform, caption: m ? m[2] : d, author: m ? `@${m[1]}` : "" };
+  }
+  if (platform === "tiktok") {
+    const o = await fetchJson(`https://www.tiktok.com/oembed?url=${encodeURIComponent(u.href)}`);
+    if (o?.title) return { platform, caption: o.title, author: o.author_unique_id ? `@${o.author_unique_id}` : o.author_name || "" };
+  }
+  if (platform === "youtube") {
+    const html = await fetchPage(u, BROWSER_UA);
+    const raw = (html.match(/"shortDescription":"((?:[^"\\]|\\.)*)"/) || [])[1];
+    let description = "";
+    try { description = raw ? JSON.parse(`"${raw}"`) : ""; } catch { /* keep empty */ }
+    const title = meta(html, "og:title");
+    const author = (html.match(/"ownerChannelName":"((?:[^"\\]|\\.)*)"/) || [])[1] || "";
+    if (description || title) return { platform, caption: description, title, author };
+  }
+  // Facebook and anything above that came back empty: the link preview text.
+  const html = await fetchPage(u, PREVIEW_UA);
+  return { platform, caption: meta(html, "og:description") || meta(html, "description"), title: meta(html, "og:title") };
+}
+
+// Without AI: split a caption into ingredients and steps by its own headings.
+// (\b does not work next to Hebrew letters, so a heading is the word followed by no other letter.)
+const ING_HEAD = /^[^\p{L}\d]*(?:מצרכים|המצרכים|מרכיבים|רכיבים|חומרים|ingredients?)(?!\p{L})[^\p{L}]*$/iu;
+const STEP_HEAD = /^[^\p{L}\d]*(?:אופן ההכנה|אופן הכנה|הכנה|ההכנה|הוראות|הוראות הכנה|שלבי הכנה|instructions?|method|directions|preparation|how to make)(?!\p{L})[^\p{L}]*$/iu;
+const tidy = t => t.replace(/#[\p{L}\d_]+/gu, "").replace(/^[\s•\-–*·▪️✅✔️👉🔸🔹⭐️]+/u, "").replace(/^\d+[.)]\s*/, "").trim();
+function captionDraft(v, categories) {
+  const all = String(v.caption || "").split(/\n/).map(l => l.trim());
+  const ingAt = all.findIndex(l => ING_HEAD.test(l)), stepAt = all.findIndex(l => STEP_HEAD.test(l));
+  const body = l => l.map(tidy).filter(Boolean);
+  let ingredients = [], steps = [], intro = [];
+  if (ingAt >= 0) {
+    ingredients = body(all.slice(ingAt + 1, stepAt > ingAt ? stepAt : undefined));
+    if (stepAt > ingAt) steps = body(all.slice(stepAt + 1));
+    intro = body(all.slice(0, ingAt));
+  } else if (stepAt >= 0) {
+    steps = body(all.slice(stepAt + 1)); intro = body(all.slice(0, stepAt));
+  }
+  const first = body(all)[0] || "";
+  const title = (v.title && v.platform === "youtube" ? plain(v.title) : intro[0] || first).replace(/[.!:]+$/, "").slice(0, 120);
+  const draft = {
+    title, category: guessCategory({ name: title, keywords: all.join(" ") }, categories), author: v.author || "",
+    intro: intro.slice(1, 2).join(" ").slice(0, 300), servings: "", time: "", ingredients, steps,
+    notes: ingredients.length || steps.length ? "" : body(all).join("\n"),
+    vegan: /טבעונ|vegan/i.test(all.join(" ")),
+  };
+  return draft;
+}
+
 // ---- mapping schema.org data directly (used when there is no API key) ----
 function isoDuration(s) {
   const m = String(s || "").match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?/i);
@@ -113,7 +205,8 @@ const KEYWORDS = [
   ["מאפים ולחמים", /לחם|חלה|מאפ|בצק|פיתה|פוקאצ|bread|bun|pastry|focaccia|challah|dough/i],
   ["מרקים", /מרק|soup|broth/i],
   ["סלטים", /סלט|salad/i],
-  ["רטבים וממרחים", /רוטב|ממרח|מטבל|sauce|dip|spread|dressing|pesto/i],
+  ["עיקריות", /פסטה|ספגטי|לזניה|עוף|בשר|קציצ|דג |סלמון|אורז מוקפץ|pasta|spaghetti|lasagna|chicken|beef|salmon|stir.?fry/i],
+  ["רטבים וממרחים", /^(?:רוטב|ממרח|מטבל)|sauce$|dip|spread|dressing|pesto/i],
   ["משקאות", /משקה|שייק|לימונדה|drink|smoothie|cocktail|juice/i],
   ["ארוחת בוקר", /בוקר|שקשוקה|חביתה|פנקייק|breakfast|pancake|omelet|granola/i],
   ["נשנושים", /נשנוש|חטיף|קרקר|snack|cracker/i],
@@ -230,6 +323,26 @@ async function withGemini(setup, source, categories) {
   };
 }
 
+async function fromVideo(url, platform, categories) {
+  const v = await readVideo(url, platform);
+  if (!String(v.caption || "").trim() && !v.title) throw new ImportError("no_caption", `${platform}: no caption could be read`);
+  const setup = geminiSetup();
+  if (setup) {
+    const source = `This is the caption of a ${platform} video${v.author ? ` by ${v.author}` : ""}. Most of the time it holds a full recipe.\n` +
+      (v.title ? `Video title: ${v.title}\n` : "") + `Caption:\n${String(v.caption).slice(0, MAX_TEXT_CHARS)}`;
+    try {
+      const draft = await withGemini(setup, source, categories);
+      if (!draft.author && v.author) draft.author = v.author;
+      return draft;
+    } catch {
+      // Gemini unavailable, over quota or found no recipe: split the caption by its own headings.
+    }
+  }
+  const draft = captionDraft(v, categories);
+  if (!draft.title) throw new ImportError("no_caption", `${platform}: the caption is empty`);
+  return draft;
+}
+
 export default async (req) => {
   const denied = checkPassword(req);
   if (denied) return denied;
@@ -242,6 +355,8 @@ export default async (req) => {
 
   try {
     const url = checkUrl(body.url);
+    const platform = platformOf(url);
+    if (platform) return json({ recipe: { ...(await fromVideo(url, platform, categories)), source: url.href } });
     const html = await fetchPage(url);
     const data = findRecipeData(html);
     const setup = geminiSetup();
