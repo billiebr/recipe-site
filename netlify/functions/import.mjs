@@ -287,7 +287,7 @@ async function withGemini(setup, source, categories) {
           "Write every value in Hebrew, translating if the page is in another language. " +
           "Keep quantities and steps faithful to the page and do not invent anything; leave a field empty when the page does not say. " +
           `Choose the category from this list: ${JSON.stringify(categories)}.` }] },
-        contents: [{ role: "user", parts: [{ text: source }] }],
+        contents: [{ role: "user", parts: typeof source === "string" ? [{ text: source }] : source }],
         generationConfig: {
           responseMimeType: "application/json", responseSchema: DRAFT_SCHEMA, maxOutputTokens: 8000,
           ...(/^gemini-3/.test(model) ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
@@ -323,6 +323,26 @@ async function withGemini(setup, source, categories) {
   };
 }
 
+// Scanning: photos of a cookbook page, a handwritten card or a screenshot (up to 4, in order).
+const MAX_IMAGE_BYTES = 4_000_000;
+async function fromImages(images, categories) {
+  const parts = images.slice(0, 4).map(b64 => {
+    const buf = Buffer.from(String(b64 || ""), "base64");
+    if (buf.length < 100 || buf.length > MAX_IMAGE_BYTES || buf[0] !== 0xff || buf[1] !== 0xd8) throw new ImportError("bad_image");
+    return { inline_data: { mime_type: "image/jpeg", data: buf.toString("base64") } };
+  });
+  if (!parts.length) throw new ImportError("bad_image");
+  const setup = geminiSetup();
+  if (!setup) throw new ImportError("needs_ai_scan");
+  const draft = await withGemini(setup, [
+    { text: `${parts.length > 1 ? `These ${parts.length} images are pages of one recipe, in order` : "This image is a recipe"}: a cookbook page, a handwritten card, a screenshot or a photo of a screen. ` +
+      "Read all the text, including handwriting, and fill the fields from what is written. If a word is unclear, write your best reading." },
+    ...parts,
+  ], categories);
+  if (!draft.title || (!draft.ingredients.length && !draft.steps.length)) throw new ImportError("no_recipe_image");
+  return draft;
+}
+
 async function fromVideo(url, platform, categories) {
   const v = await readVideo(url, platform);
   if (!String(v.caption || "").trim() && !v.title) throw new ImportError("no_caption", `${platform}: no caption could be read`);
@@ -354,6 +374,7 @@ export default async (req) => {
   const categories = [...new Set([...CATS, ...extra])];
 
   try {
+    if (Array.isArray(body.images)) return json({ recipe: await fromImages(body.images, categories) });
     const url = checkUrl(body.url);
     const platform = platformOf(url);
     if (platform) return json({ recipe: { ...(await fromVideo(url, platform, categories)), source: url.href } });

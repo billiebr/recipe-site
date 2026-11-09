@@ -212,6 +212,10 @@ img{max-width:100%}
 .photo-prev svg{width:34px;height:34px}
 .photo-btns{display:flex;gap:8px;flex-wrap:wrap}
 .photo-btns label.btn{cursor:pointer}
+.scan-box{margin-top:10px}
+.scan-box label.btn{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+.scan-box label.btn svg{width:20px;height:20px}
+.scan-box label.btn.busy{opacity:.55;pointer-events:none}
 .video-note{margin-top:14px;font-size:.95rem}
 .watch{text-decoration:none!important;display:inline-flex;align-items:center;gap:6px}
 .keep-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:14px}
@@ -475,6 +479,11 @@ function openForm(r){
       <span class="hint">מדביקים לינק לדף מתכון או לרילז (אינסטגרם, טיקטוק, יוטיוב, פייסבוק), והספר שולף את המתכון, ממלא את השדות ובוחר קטגוריה. אחר כך רק בודקים ושומרים.</span>
       <div class="linkrow"><input id="fUrl" type="url" dir="ltr" inputmode="url" placeholder="https://… או לינק לרילז" autocomplete="off"><button class="btn" id="readUrl" type="button">קרא את המתכון</button></div>
       <span id="uMsg" class="hint live" aria-live="polite"></span></div></div>
+    <div class="callout link-box scan-box"><div class="f"><span class="lbl-like">סריקה מתמונה</span>
+      <span class="hint">מצלמים דף מספר מתכונים, כרטיס בכתב יד או צילום מסך, והספר קורא ממנו את המתכון. מתכון על כמה דפים? מעלים עד 4 תמונות לפי הסדר.</span>
+      <div class="row-btns"><label class="btn" for="scanCam">${CAM}צילום</label><input type="file" id="scanCam" accept="image/*" capture="environment" hidden>
+        <label class="btn ghost" for="scanPick">העלאת תמונות</label><input type="file" id="scanPick" accept="image/*" multiple hidden></div>
+      <span id="scanMsg" class="hint live" aria-live="polite"></span></div></div>
     <div class="or">או מלאו בעצמכם</div>`:"";
   const videoNote=fromLink&&isVideo(r.source)&&!(r.ingredients||[]).length&&!(r.steps||[]).length
     ?`<div class="callout video-note">לא מצאתי בכיתוב חלוקה ברורה למצרכים ולשלבים, אז כל הכיתוב נמצא בשדה ״הערות״. העבירו את השורות למקום הנכון ושמרו.</div>`:"";
@@ -509,6 +518,18 @@ function openForm(r){
       catch(err){$("#readUrl").disabled=false;$("#uMsg").textContent=err.message;}
     };
     $("#readUrl").onclick=read;
+    const scan=async e=>{
+      const files=[...e.target.files].slice(0,4);e.target.value="";if(!files.length)return;
+      const btns=document.querySelectorAll(".scan-box label.btn");btns.forEach(b=>b.classList.add("busy"));
+      $("#scanMsg").textContent=files.length>1?`מכין ${files.length} תמונות…`:"מכין את התמונה…";
+      try{
+        const images=[];for(const f of files)images.push(await shrink(f,1600,.85));
+        $("#scanMsg").textContent="קורא את המתכון מהתמונה… זה יכול לקחת כמה שניות.";
+        const {recipe}=await api("POST",{images,categories:allCats()},null,"/api/import");openForm(recipe);
+      }catch(err){$("#scanMsg").textContent=err.message||"לא הצלחתי לקרוא את התמונה. נסו תמונה אחרת.";}
+      finally{btns.forEach(b=>b.classList.remove("busy"));}
+    };
+    $("#scanCam").onchange=scan;$("#scanPick").onchange=scan;
     $("#fUrl").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();read();}};
     $("#fUrl").focus();
   }
@@ -543,7 +564,7 @@ function openForm(r){
 
 /* Talking to the site's API. The family password travels in a header; a 401 sends the viewer back to the login screen. */
 const IMPORT_ERRORS={bad_url:"זה לא נראה כמו לינק לאתר. בדקו שהוא מתחיל ב-https://",fetch_failed:"לא הצלחתי לפתוח את הדף. בדקו את הלינק, או מלאו את המתכון בעצמכם.",
-  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם.",no_caption:"לא הצלחתי לקרוא את הכיתוב של הסרטון. אם הוא פרטי או שהאתר חסם את הקריאה, העתיקו את הכיתוב מהאפליקציה והדביקו אותו בשדות בעצמכם.",busy:"הקריאה האוטומטית הגיעה למכסה היומית החינמית. נסו שוב מחר, או מלאו את המתכון בעצמכם.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
+  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם.",bad_image:"לא הצלחתי לקרוא את התמונה. נסו תמונה אחרת (JPG או PNG).",needs_ai_scan:"סריקה מתמונה צריכה את Gemini, והוא עוד לא מחובר לאתר.",no_recipe_image:"לא מצאתי מתכון בתמונה. נסו לצלם מקרוב יותר, עם תאורה טובה וכשכל הטקסט בתוך התמונה.",no_caption:"לא הצלחתי לקרוא את הכיתוב של הסרטון. אם הוא פרטי או שהאתר חסם את הקריאה, העתיקו את הכיתוב מהאפליקציה והדביקו אותו בשדות בעצמכם.",busy:"הקריאה האוטומטית הגיעה למכסה היומית החינמית. נסו שוב מחר, או מלאו את המתכון בעצמכם.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
 async function api(method,body,id,path="/api/recipes"){
   let res;
   try{res=await fetch(path+(id?`?id=${encodeURIComponent(id)}`:""),{method,headers:{"x-family-password":PW,...(body?{"content-type":"application/json"}:{})},body:body?JSON.stringify(body):undefined});}
