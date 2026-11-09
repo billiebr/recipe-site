@@ -31,14 +31,20 @@ function clean(input, prev = {}) {
 // id it has applied, so a recipe is copied in once, again only when Claude bumps
 // its rev, and never comes back after it was deleted on the site.
 // An entry with "deleted": true removes that recipe.
+// An entry with "patch": ["field", ...] updates only those fields of the recipe on the
+// site, keeping everything the family changed there (star, photo, notes...). A patch never
+// brings back a recipe that was deleted on the site.
 async function syncFromRepo(store) {
   const seed = JSON.parse(await readFile(new URL("../../data/seed.json", import.meta.url), "utf8"));
   const applied = (await store.get("_meta/applied", { type: "json" })) || {};
   let changed = false;
-  for (const { id, rev = 1, deleted, ...r } of seed) {
+  for (const { id, rev = 1, deleted, patch, ...r } of seed) {
     if (!/^[\w-]{1,80}$/.test(id || "") || (applied[id] || 0) >= rev) continue;
+    const prev = await store.get("r/" + id, { type: "json" });
     if (deleted) await store.delete("r/" + id);
-    else await store.setJSON("r/" + id, clean(r));
+    else if (Array.isArray(patch) && applied[id]) {
+      if (prev) await store.setJSON("r/" + id, clean({ ...prev, ...Object.fromEntries(patch.map(f => [f, r[f]])) }, prev));
+    } else await store.setJSON("r/" + id, clean(r, prev || {}));
     applied[id] = rev; changed = true;
   }
   if (changed) await store.setJSON("_meta/applied", applied);
