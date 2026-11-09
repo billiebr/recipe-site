@@ -291,7 +291,7 @@ const lines=t=>String(t||"").split("\n").map(s=>s.trim()).filter(Boolean);
 try{cat=localStorage.getItem("recipes.cat")||"הכל";}catch{}
 
 /* Search normalisation: ignore niqqud, quote marks, case and final letters, so "עוף" finds "עופות" and "קציצות" finds "קְצִיצוֹת". */
-const SKIP=/[֑-ׇ״"׳'`]/;
+const SKIP=/[\u0591-\u05C7״"׳'`]/;
 const FINAL={"ך":"כ","ם":"מ","ן":"נ","ף":"פ","ץ":"צ"};
 const ncf=c=>FINAL[c]||c.toLowerCase();
 function norm(s){let o="";for(const c of String(s??"")){if(!SKIP.test(c))o+=ncf(c);}return o.replace(/\s+/g," ").trim();}
@@ -307,7 +307,12 @@ function hl(text,ts){
   return out+(open?"</mark>":"");
 }
 const isVegan=r=>r.vegan===true||(r.vegan!==false&&/טבעונ|vegan/i.test([r.title,r.category,r.intro,r.notes].join(" ")));
+/* Same clean-up as the server: Hebrew presentation forms → plain letters, niqqud marks removed,
+   so recipes saved before the fix also show in the right font. */
+const plainHe=t=>String(t??"").replace(/[\uFB1D-\uFB4F]/g,c=>c.normalize("NFKC")).replace(/[\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]/g,"").replace(/[\u200C\u200D\uFEFF]/g,"");
 function index(r){
+  for(const f of ["title","intro","notes","author","time","servings","category"])if(r[f])r[f]=plainHe(r[f]);
+  for(const f of ["ingredients","steps"])if(Array.isArray(r[f]))r[f]=r[f].map(plainHe);
   r._t=norm(r.title);
   r._all=norm([r.title,r.category,r.intro,r.author,r.notes,isVegan(r)?"טבעוני":"",...(r.ingredients||[]),...(r.steps||[])].join(" \n "));
   return r;

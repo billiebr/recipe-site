@@ -6,12 +6,13 @@ import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { json, checkPassword } from "../lib/auth.mjs";
 import { PHOTO_ID, deletePhoto } from "../lib/photos.mjs";
+import { plainHebrew } from "../lib/text.mjs";
 
 const FIELDS = ["title", "category", "time", "servings", "author", "source", "intro", "notes"];
 function clean(input, prev = {}) {
   const r = {};
-  for (const f of FIELDS) r[f] = String(input[f] ?? "").slice(0, 5000).trim();
-  for (const f of ["ingredients", "steps"]) r[f] = (Array.isArray(input[f]) ? input[f] : []).map(s => String(s).slice(0, 2000).trim()).filter(Boolean).slice(0, 200);
+  for (const f of FIELDS) r[f] = plainHebrew(input[f]).slice(0, 5000).trim();
+  for (const f of ["ingredients", "steps"]) r[f] = (Array.isArray(input[f]) ? input[f] : []).map(s => plainHebrew(s).slice(0, 2000).trim()).filter(Boolean).slice(0, 200);
   // Flags keep their saved value when a request leaves them out.
   for (const f of ["vegan", "fav"]) {
     if (typeof input[f] === "boolean") r[f] = input[f];

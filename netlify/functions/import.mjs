@@ -7,6 +7,7 @@
 //    key, or when Gemini is slow or over its free quota, the recipe data is mapped directly
 //    and the category is guessed from keywords.
 import { json, checkPassword } from "../lib/auth.mjs";
+import { plainHebrew } from "../lib/text.mjs";
 
 const CATS = ["עיקריות", "מנות ראשונות", "סלטים", "מרקים", "תוספות", "מאפים ולחמים", "עוגות וקינוחים", "נשנושים", "ארוחת בוקר", "רטבים וממרחים", "משקאות"];
 
@@ -314,7 +315,7 @@ async function withGemini(setup, source, categories) {
     throw new ImportError("read_failed", `Gemini returned no usable answer (${cand?.finishReason || out.promptFeedback?.blockReason || "empty"})`);
   }
   if (!draft.is_recipe) throw new ImportError("no_recipe");
-  const str = v => String(v ?? "").trim();
+  const str = v => plainHebrew(v).trim();
   const list = v => (Array.isArray(v) ? v : []).map(str).filter(Boolean);
   return {
     title: str(draft.title), category: str(draft.category) || "עיקריות", author: str(draft.author), intro: str(draft.intro),
