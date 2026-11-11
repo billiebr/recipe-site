@@ -228,6 +228,11 @@ img{max-width:100%}
 .stepper input::-webkit-inner-spin-button,.stepper input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 .scaler .hint{flex-basis:100%;order:3}
 ul.ing li.scaled span{color:var(--eggplant);font-weight:700}
+.confirm-ov{position:fixed;inset:0;z-index:30;background:rgba(21,12,24,.55);display:grid;place-items:center;padding:16px}
+.confirm-box{background:var(--card);color:var(--ink);border-radius:16px;box-shadow:0 20px 60px -20px rgba(0,0,0,.6);padding:22px 22px 18px;width:100%;max-width:380px;display:flex;flex-direction:column;gap:10px}
+.confirm-box h3{margin:0;font-family:var(--display);font-weight:700;font-size:2rem;line-height:1;text-wrap:balance}
+.confirm-box p{margin:0;color:var(--muted)}
+.confirm-box .row-btns{margin-top:6px}
 .keep-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:14px}
 .keep{display:inline-flex;align-items:center;gap:8px}
 .keep svg{width:20px;height:20px;flex:none}
@@ -533,9 +538,11 @@ function openRecipe(id){
     catch(err){$("#fillAmt").disabled=false;$("#fillMsg").textContent=err.message;}
   };
   $("#edit").onclick=()=>openForm(r);
-  $("#del").onclick=()=>{$("#delWrap").innerHTML=`<span class="row-btns">למחוק לצמיתות? <button class="btn warn" id="yes">מחיקה</button><button class="btn ghost" id="no">ביטול</button></span>`;
-    $("#no").onclick=()=>openRecipe(id);
-    $("#yes").onclick=async()=>{try{await api("DELETE",null,id);recipes=recipes.filter(x=>x.id!==id);closeModal();render();}catch(e){$("#delWrap").innerHTML=`<span class="err">המחיקה נכשלה. נסו שוב.</span>`;}};};
+  $("#del").onclick=async()=>{
+    if(!await confirmBox(`בטוח מוחקים את ״${r.title}״?`,"המתכון יימחק מהספר לכל המשפחה, ואי אפשר לשחזר אותו.","כן, למחוק"))return;
+    try{await api("DELETE",null,id);recipes=recipes.filter(x=>x.id!==id);closeModal();render();}
+    catch(e){$("#delWrap").innerHTML=`<span class="err">המחיקה נכשלה. נסו שוב.</span>`;}
+  };
   $("#cook").onclick=async()=>{try{wakeLock=await navigator.wakeLock.request("screen");$("#cook").textContent="המסך יישאר דלוק ✓";$("#cook").disabled=true;}catch{$("#cook").textContent="הדפדפן לא מאפשר";$("#cook").disabled=true;}};
 }
 /* Favourites: the star in the recipe page. Saved with the recipe, so it shows on every device. */
@@ -566,6 +573,23 @@ async function toKeep(r){
   try{await navigator.clipboard.writeText(`${title}\n${text}`);copied=true;}catch{}
   window.open("https://keep.google.com/#home","_blank","noopener");
   msg.textContent=copied?"הרשימה הועתקה. ב-Keep פתחו פתק חדש והדביקו (Ctrl+V). אפשר להפוך אותו לרשימה עם תיבות סימון מתפריט ⋮.":"לא הצלחתי להעתיק. סמנו את המצרכים, העתיקו והדביקו בפתק חדש ב-Keep.";
+}
+/* A yes/no question in the middle of the screen. Resolves true only on the red button. */
+function confirmBox(title,text,okLabel){
+  return new Promise(done=>{
+    const back=document.activeElement;
+    const el=document.createElement("div");el.className="confirm-ov";el.id="confirm";
+    el.innerHTML=`<div class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="cTitle" aria-describedby="cText">
+      <h3 id="cTitle">${esc(title)}</h3><p id="cText">${esc(text)}</p>
+      <div class="row-btns"><button class="btn warn" id="cYes" type="button">${esc(okLabel)}</button><button class="btn ghost" id="cNo" type="button">ביטול</button></div></div>`;
+    document.body.appendChild(el);
+    const close=v=>{el.remove();document.removeEventListener("keydown",key,true);if(back)back.focus();done(v);};
+    const key=e=>{if(e.key==="Escape"){e.stopPropagation();close(false);}};
+    document.addEventListener("keydown",key,true);
+    el.onclick=e=>{if(e.target===el)close(false);};
+    el.querySelector("#cYes").onclick=()=>close(true);el.querySelector("#cNo").onclick=()=>close(false);
+    el.querySelector("#cNo").focus();
+  });
 }
 function releaseWake(){try{wakeLock&&wakeLock.release();}catch{}wakeLock=null;}
 const isVideo=u=>{try{return /(^|\.)(instagram\.com|tiktok\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch)$/.test(new URL(u).hostname);}catch{return false;}};
