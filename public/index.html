@@ -216,6 +216,8 @@ img{max-width:100%}
 .scan-box label.btn{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
 .scan-box label.btn svg{width:20px;height:20px}
 .scan-box label.btn.busy{opacity:.55;pointer-events:none}
+.fill-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:14px}
+.paste-box{margin-top:10px}
 .video-note{margin-top:14px;font-size:.95rem}
 .watch{text-decoration:none!important;display:inline-flex;align-items:center;gap:6px}
 .scaler{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:-4px 0 12px}
@@ -466,6 +468,9 @@ function baseServings(text){
   return m?{n:+m[1],unit:m[2]&&!/^(גרם|ק"ג|קילו|ליטר|כוסות?)$/.test(m[2])?m[2]:"סועדים"}:{n:0,unit:""};
 }
 
+/* An ingredient "has an amount" when it carries a number, a fraction or a kitchen measure word. */
+const hasAmount=t=>/[\d½⅓⅔¼¾⅛]|חצי|רבע|שליש|קורט|קמצוץ|מעט|לפי הטעם|צרור|חופן|שפע|בינוני|גדול|קטנ|שלם|אחד|אחת|שני|שתי|שלוש|ארבע|כף|כפית|כוס|שקית|חבילה|קופסה|פחית|ענף|גבעול|שן |שיני|פרוס|אופציונלי|לא חובה/.test(t);
+const missingAmounts=r=>(r.ingredients||[]).length>0&&((r.ingredients||[]).some(t=>!/[:：]$/.test(t)&&!hasAmount(t))||!(r.servings||"").trim());
 function openRecipe(id){
   const r=recipes.find(x=>x.id===id);if(!r)return;
   const[bg]=styleOf(r.category);const ts=terms();
@@ -495,6 +500,7 @@ function openRecipe(id){
       <div class="facts">${fact("זמן",r.time)}${fact("כמות",r.servings)}${fact("מצרכים",(r.ingredients||[]).filter(t=>!/[:：]$/.test(t)).length||"")}</div>
       <div class="recipe-body">
         <section><div class="h4">מצרכים</div>${scaler}<div class="index"><ul class="ing">${ing||"<li>—</li>"}</ul></div>
+          ${missingAmounts(r)?`<div class="fill-row"><button class="btn ghost" id="fillAmt" type="button">השלמת כמויות</button><span class="hint live" id="fillMsg" aria-live="polite">יש מצרכים בלי כמות${r.servings?"":" ואין מספר מנות"}.</span></div>`:""}
           ${(r.ingredients||[]).length?`<div class="keep-row"><button class="btn ghost keep" id="keep" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#f6b400" d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path fill="#fff" d="M12 7a4 4 0 0 0-2.2 7.3V16h4.4v-1.7A4 4 0 0 0 12 7zm-2 10h4v1.2a.8.8 0 0 1-.8.8h-2.4a.8.8 0 0 1-.8-.8z"/></svg>יצירת רשימה ב-Keep</button><span class="hint live" id="keepMsg" aria-live="polite"></span></div>`:""}
         </section>
         <section><div class="h4">ההכנה</div><ol class="steps" id="steps">${steps||"<li>—</li>"}</ol></section>
@@ -520,6 +526,12 @@ function openRecipe(id){
     if(base.n)$("#sNum").onchange=e=>set(+e.target.value);
   }
   $("#fav").onclick=()=>toggleFav(r);
+  if($("#fillAmt"))$("#fillAmt").onclick=async()=>{
+    $("#fillAmt").disabled=true;$("#fillMsg").textContent="מחשב כמויות…";
+    try{const {_t,_all,...plain}=r;const {recipe:add}=await api("POST",{fillAmounts:plain,categories:allCats()},null,"/api/import");
+      openForm({...r,ingredients:add.ingredients,servings:add.servings||r.servings,_filled:true});}
+    catch(err){$("#fillAmt").disabled=false;$("#fillMsg").textContent=err.message;}
+  };
   $("#edit").onclick=()=>openForm(r);
   $("#del").onclick=()=>{$("#delWrap").innerHTML=`<span class="row-btns">למחוק לצמיתות? <button class="btn warn" id="yes">מחיקה</button><button class="btn ghost" id="no">ביטול</button></span>`;
     $("#no").onclick=()=>openRecipe(id);
@@ -571,10 +583,16 @@ function openForm(r){
       <div class="row-btns"><label class="btn" for="scanCam">${CAM}צילום</label><input type="file" id="scanCam" accept="image/*" capture="environment" hidden>
         <label class="btn ghost" for="scanPick">העלאת תמונות</label><input type="file" id="scanPick" accept="image/*" multiple hidden></div>
       <span id="scanMsg" class="hint live" aria-live="polite"></span></div></div>
+    <div class="callout link-box paste-box"><div class="f"><label for="fPaste">הדבקת טקסט</label>
+      <span class="hint">כשהלינק לא נקרא, מעתיקים את טקסט המתכון (מהכיתוב של הרילז, מוואטסאפ או מכל מקום) ומדביקים כאן.</span>
+      <textarea id="fPaste" style="min-height:120px" placeholder="מדביקים כאן את טקסט המתכון…"></textarea>
+      <div class="row-btns"><button class="btn" id="readPaste" type="button">סדר לי את המתכון</button></div>
+      <span id="pasteMsg" class="hint live" aria-live="polite"></span></div></div>
     <div class="or">או מלאו בעצמכם</div>`:"";
+  const filledNote=r._filled?`<div class="callout video-note">הוספתי כמויות משוערות למצרכים שהיו בלי כמות, מסומנות ב״כ-״. בדקו, תקנו אם צריך ושמרו.</div>`:"";
   const videoNote=fromLink&&isVideo(r.source)&&!(r.ingredients||[]).length&&!(r.steps||[]).length
     ?`<div class="callout video-note">לא מצאתי בכיתוב חלוקה ברורה למצרכים ולשלבים, אז כל הכיתוב נמצא בשדה ״הערות״. העבירו את השורות למקום הנכון ושמרו.</div>`:"";
-  shell(`<div class="form-head"><h2>${!isNew?"עריכת מתכון":fromLink?"בדקו ושמרו":"מתכון חדש"}</h2>${videoNote}</div>
+  shell(`<div class="form-head"><h2>${!isNew?"עריכת מתכון":fromLink?"בדקו ושמרו":"מתכון חדש"}</h2>${videoNote}${filledNote}</div>
     <div class="inner">${linkUI}<form class="form" id="mf">
     <div class="f"><label for="fTitle">שם המתכון</label><input id="fTitle" required value="${esc(r.title)}"></div>
     <fieldset class="toggle"><legend>טבעוני?</legend><div class="opts">
@@ -617,6 +635,14 @@ function openForm(r){
       finally{btns.forEach(b=>b.classList.remove("busy"));}
     };
     $("#scanCam").onchange=scan;$("#scanPick").onchange=scan;
+    $("#readPaste").onclick=async()=>{
+      const text=$("#fPaste").value.trim();
+      if(text.length<20){$("#pasteMsg").textContent="הדביקו קודם את טקסט המתכון.";return;}
+      $("#readPaste").disabled=true;$("#pasteMsg").textContent="מסדר את המתכון…";
+      const src=(text.match(/https?:\/\/[^\s"'<>]+/)||[])[0]||"";
+      try{const {recipe}=await api("POST",{text,categories:allCats()},null,"/api/import");openForm({...recipe,source:recipe.source||src});}
+      catch(err){$("#readPaste").disabled=false;$("#pasteMsg").textContent=err.message;}
+    };
     $("#fUrl").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();read();}};
     $("#fUrl").focus();
   }
@@ -651,7 +677,7 @@ function openForm(r){
 
 /* Talking to the site's API. The family password travels in a header; a 401 sends the viewer back to the login screen. */
 const IMPORT_ERRORS={bad_url:"זה לא נראה כמו לינק לאתר. בדקו שהוא מתחיל ב-https://",fetch_failed:"לא הצלחתי לפתוח את הדף. בדקו את הלינק, או מלאו את המתכון בעצמכם.",
-  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם.",bad_image:"לא הצלחתי לקרוא את התמונה. נסו תמונה אחרת (JPG או PNG).",needs_ai_scan:"סריקה מתמונה צריכה את Gemini, והוא עוד לא מחובר לאתר.",no_recipe_image:"לא מצאתי מתכון בתמונה. נסו לצלם מקרוב יותר, עם תאורה טובה וכשכל הטקסט בתוך התמונה.",no_caption:"לא הצלחתי לקרוא את הכיתוב של הסרטון. אם הוא פרטי או שהאתר חסם את הקריאה, העתיקו את הכיתוב מהאפליקציה והדביקו אותו בשדות בעצמכם.",busy:"הקריאה האוטומטית הגיעה למכסה היומית החינמית. נסו שוב מחר, או מלאו את המתכון בעצמכם.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
+  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם.",short_text:"הטקסט קצר מדי. הדביקו את כל המתכון.",needs_ai_fill:"השלמת כמויות צריכה את Gemini, והוא עוד לא מחובר לאתר.",no_ingredients:"אין במתכון מצרכים להשלים להם כמויות.",bad_image:"לא הצלחתי לקרוא את התמונה. נסו תמונה אחרת (JPG או PNG).",needs_ai_scan:"סריקה מתמונה צריכה את Gemini, והוא עוד לא מחובר לאתר.",no_recipe_image:"לא מצאתי מתכון בתמונה. נסו לצלם מקרוב יותר, עם תאורה טובה וכשכל הטקסט בתוך התמונה.",no_caption:"לא הצלחתי לקרוא את הכיתוב של הסרטון. אם הוא פרטי או שהאתר חסם את הקריאה, העתיקו את הכיתוב מהאפליקציה והדביקו אותו בשדות בעצמכם.",busy:"הקריאה האוטומטית הגיעה למכסה היומית החינמית. נסו שוב מחר, או מלאו את המתכון בעצמכם.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
 async function api(method,body,id,path="/api/recipes"){
   let res;
   try{res=await fetch(path+(id?`?id=${encodeURIComponent(id)}`:""),{method,headers:{"x-family-password":PW,...(body?{"content-type":"application/json"}:{})},body:body?JSON.stringify(body):undefined});}

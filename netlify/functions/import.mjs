@@ -284,9 +284,11 @@ async function withGemini(setup, source, categories) {
       headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text:
-          "You turn a recipe web page into fields for a family's Hebrew recipe book. " +
-          "Write every value in Hebrew, translating if the page is in another language. " +
-          "Keep quantities and steps faithful to the page and do not invent anything; leave a field empty when the page does not say. " +
+          "You turn a recipe (a web page, a video caption, a photo or pasted text) into fields for a family's Hebrew recipe book. " +
+          "Write every value in Hebrew, translating if the source is in another language. " +
+          "Keep the ingredients, quantities and steps faithful to the source and do not invent ingredients or steps. " +
+          "When an ingredient has no quantity in the source, add a typical amount for this recipe and start it with \"כ-\" so the family sees it is an estimate (for example \"כ-3 כפות שמן\", \"כ-1 כפית מלח\"). " +
+          "When the source does not say how many it serves, estimate it the same way (for example \"כ-6 מנות\"). Leave time and author empty when the source does not say. " +
           `Choose the category from this list: ${JSON.stringify(categories)}.` }] },
         contents: [{ role: "user", parts: typeof source === "string" ? [{ text: source }] : source }],
         generationConfig: {
@@ -344,6 +346,38 @@ async function fromImages(images, categories) {
   return draft;
 }
 
+// Pasted text: a caption copied from a reel, a WhatsApp message, a page...
+async function fromText(text, categories) {
+  text = String(text).trim().slice(0, MAX_TEXT_CHARS);
+  if (text.length < 20) throw new ImportError("short_text");
+  const setup = geminiSetup();
+  if (setup) {
+    try { return await withGemini(setup, `Recipe text the family copied and pasted (often a video caption or a message):\n${text}`, categories); }
+    catch (e) { if (e instanceof ImportError && e.message === "no_recipe") throw e; /* else split it by its own headings below */ }
+  }
+  const draft = captionDraft({ caption: text }, categories);
+  if (!draft.title) throw new ImportError("no_recipe");
+  return draft;
+}
+
+// "השלמת כמויות": estimated amounts for ingredients that have none, and servings when missing.
+async function fillAmounts(r, categories) {
+  const setup = geminiSetup();
+  if (!setup) throw new ImportError("needs_ai_fill");
+  const recipe = {
+    title: plainHebrew(r.title), category: plainHebrew(r.category), servings: plainHebrew(r.servings),
+    ingredients: (Array.isArray(r.ingredients) ? r.ingredients : []).map(plainHebrew).slice(0, 200),
+    steps: (Array.isArray(r.steps) ? r.steps : []).map(plainHebrew).slice(0, 200), notes: plainHebrew(r.notes).slice(0, 3000),
+  };
+  if (!recipe.ingredients.length) throw new ImportError("no_ingredients");
+  const draft = await withGemini(setup,
+    "Here is a recipe from the family book. Return it with the same title, steps and notes, and the same ingredients in the same order " +
+    "(keep group headers that end with a colon). Change only this: every ingredient that has no quantity gets a typical amount for this recipe, " +
+    "starting with \"כ-\"; a line that lists several seasonings may be split into one line per seasoning. Keep every quantity that is already there exactly as written. " +
+    "If servings is empty, estimate it starting with \"כ-\".\n" + JSON.stringify(recipe), categories);
+  return { ingredients: draft.ingredients, servings: recipe.servings || draft.servings };
+}
+
 async function fromVideo(url, platform, categories) {
   const v = await readVideo(url, platform);
   if (!String(v.caption || "").trim() && !v.title) throw new ImportError("no_caption", `${platform}: no caption could be read`);
@@ -376,6 +410,8 @@ export default async (req) => {
 
   try {
     if (Array.isArray(body.images)) return json({ recipe: await fromImages(body.images, categories) });
+    if (typeof body.text === "string") return json({ recipe: await fromText(body.text, categories) });
+    if (body.fillAmounts && typeof body.fillAmounts === "object") return json({ recipe: await fillAmounts(body.fillAmounts, categories) });
     const url = checkUrl(body.url);
     const platform = platformOf(url);
     if (platform) return json({ recipe: { ...(await fromVideo(url, platform, categories)), source: url.href } });
