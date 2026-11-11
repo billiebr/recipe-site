@@ -218,6 +218,14 @@ img{max-width:100%}
 .scan-box label.btn.busy{opacity:.55;pointer-events:none}
 .video-note{margin-top:14px;font-size:.95rem}
 .watch{text-decoration:none!important;display:inline-flex;align-items:center;gap:6px}
+.scaler{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:-4px 0 12px}
+.stepper{display:inline-flex;align-items:center;border:2px solid var(--line);border-radius:999px;background:var(--card);overflow:hidden}
+.stepper button{border:0;background:transparent;width:40px;height:38px;font-size:1.3rem;font-weight:800;cursor:pointer;color:var(--ink)}
+.stepper button:hover{background:var(--soft)}
+.stepper input,.stepper output{width:3.4em;text-align:center;border:0;background:transparent;font-weight:800;font-size:1.05rem;font-variant-numeric:tabular-nums;-moz-appearance:textfield}
+.stepper input::-webkit-inner-spin-button,.stepper input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.scaler .hint{flex-basis:100%;order:3}
+ul.ing li.scaled span{color:var(--eggplant);font-weight:700}
 .keep-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:14px}
 .keep{display:inline-flex;align-items:center;gap:8px}
 .keep svg{width:20px;height:20px;flex:none}
@@ -413,10 +421,70 @@ function shell(html){
 }
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#ov"))closeModal();});
 
+/* Serving scaler: multiplies the amounts in an ingredient line, leaving times, temperatures and sizes alone. */
+const FRAC={"½":1/2,"⅓":1/3,"⅔":2/3,"¼":1/4,"¾":3/4,"⅛":1/8};
+const WORDS={"חצי":1/2,"רבע":1/4,"שליש":1/3};
+const NUM=String.raw`(?:\d+(?:[.,]\d+)?\s*[½⅓⅔¼¾⅛]|\d+\s*\/\s*\d+|\d+(?:[.,]\d+)?|[½⅓⅔¼¾⅛])`;
+const AMOUNT=new RegExp(`(${NUM})(\\s*(?:-|–|עד)\\s*(${NUM}))?|(?<![\\p{L}])([במלוכש]?)(חצי|רבע|שליש)(?=\\s)`,"gu");
+const NOT_AMOUNT_AFTER=/^\s*(?:-\s*)?(?:מעלות|°|דקות|דקה|שעות|שעה|שניות|ס"מ|סנטימטר|מ"מ|%|ימים|יום|לילות|לילה)/;
+const NOT_AMOUNT_BEFORE=/(?:מס'|מספר|ריכוז(?:\s+\S+){0,2}|של)\s*$/;
+function readNum(t){
+  t=t.replace(/\s+/g,"").replace(",",".");
+  const m=t.match(/^(\d+(?:\.\d+)?)([½⅓⅔¼¾⅛])$/);if(m)return +m[1]+FRAC[m[2]];
+  if(FRAC[t]!=null)return FRAC[t];
+  if(t.includes("/")){const[a,b]=t.split("/");return +a/+b;}
+  return +t;
+}
+function fmtNum(x){
+  if(x>=10)return String(Math.round(x));
+  const whole=Math.floor(x),rest=x-whole;
+  const opts=[[0,""],[1/4,"¼"],[1/3,"⅓"],[1/2,"½"],[2/3,"⅔"],[3/4,"¾"],[1,""]];
+  let best=opts[0];for(const o of opts)if(Math.abs(o[0]-rest)<Math.abs(best[0]-rest))best=o;
+  const w=whole+(best[0]===1?1:0);
+  if(!best[1])return String(w||(x>0?"¼":"0"));
+  return w?`${w}${best[1]}`:best[1];
+}
+function scaleLine(line,k){
+  if(k===1)return [line,false];
+  let changed=false;
+  const out=line.replace(AMOUNT,(m,a,range,b,pre,word,off,str)=>{
+    const after=str.slice(off+m.length),before=str.slice(0,off);
+    if(NOT_AMOUNT_AFTER.test(after)||NOT_AMOUNT_BEFORE.test(before))return m;
+    changed=true;
+    if(word)return pre?`${pre}-${fmtNum(WORDS[word]*k)}`:fmtNum(WORDS[word]*k);
+    const x=fmtNum(readNum(a)*k);
+    return b?`${x}-${fmtNum(readNum(b)*k)}`:x;
+  });
+  return [out,changed];
+}
+/* The recipe's base amount and what it counts: "כ-6 מנות" → 6 סועדים, "כ-40 ריבועים" → 40 ריבועים. */
+function baseServings(text){
+  const t=String(text||"");
+  let m=t.match(/(\d+)\s*(?:מנות|סועדים|איש|אנשים|servings?)/);
+  if(m)return {n:+m[1],unit:"סועדים"};
+  m=t.match(/(\d+)\s*([\p{L}"׳']+)?/u);
+  return m?{n:+m[1],unit:m[2]&&!/^(גרם|ק"ג|קילו|ליטר|כוסות?)$/.test(m[2])?m[2]:"סועדים"}:{n:0,unit:""};
+}
+
 function openRecipe(id){
   const r=recipes.find(x=>x.id===id);if(!r)return;
   const[bg]=styleOf(r.category);const ts=terms();
-  const ing=(r.ingredients||[]).map((t,i)=>/[:：]$/.test(t)?`<li class="grp">${esc(t.replace(/[:：]$/,""))}</li>`:`<li><label><input type="checkbox" id="ing${i}"><span>${hl(t,ts)}</span></label></li>`).join("");
+  // Servings: base amount from the "כמות" field; without a number, a plain multiplier (×½ … ×4).
+  const base=baseServings(r.servings), MULTS=[0.5,1,1.5,2,3,4];
+  let k=1, amount=base.n;
+  const lines=()=>(r.ingredients||[]).map(t=>/[:：]$/.test(t)?t:scaleLine(t,k)[0]);
+  const ingHtml=()=>(r.ingredients||[]).map((t,i)=>{
+    if(/[:：]$/.test(t))return `<li class="grp">${esc(t.replace(/[:：]$/,""))}</li>`;
+    const [txt,changed]=scaleLine(t,k);
+    return `<li${changed?' class="scaled"':""}><label><input type="checkbox" id="ing${i}"><span>${k===1?hl(t,ts):esc(txt)}</span></label></li>`;}).join("");
+  const ing=ingHtml();
+  const scaler=(r.ingredients||[]).length?`<div class="scaler">
+      <span class="lbl-like" id="sLbl">${base.n?`כמה ${esc(base.unit)}?`:"כמות:"}</span>
+      <div class="stepper"><button type="button" id="sMinus" aria-label="פחות">−</button>
+        ${base.n?`<input id="sNum" type="number" inputmode="numeric" min="1" max="999" value="${base.n}" aria-label="מספר ${esc(base.unit)}">`:`<output id="sNum">×1</output>`}
+        <button type="button" id="sPlus" aria-label="יותר">+</button></div>
+      <button type="button" class="linkbtn" id="sReset" hidden>חזרה ל${base.n?`-${base.n}`:"כמות המקורית"}</button>
+      <span class="hint" id="sHint" hidden>הכמויות בשלבי ההכנה לא משתנות.</span></div>`:"";
   const steps=(r.steps||[]).map(t=>`<li><span>${hl(t,ts)}</span></li>`).join("");
   const fact=(k,v)=>v?`<div><small>${k}</small><b>${esc(v)}</b></div>`:"";
   shell(`<div class="head${r.photo?" has-photo":""}" style="${headVars(r.category)}${photoStyle(r,false)}"><span class="glyph" aria-hidden="true">${esc(initial(r.title))}</span>
@@ -426,7 +494,7 @@ function openRecipe(id){
       ${r.intro?`<p class="intro">${esc(r.intro)}</p>`:""}
       <div class="facts">${fact("זמן",r.time)}${fact("כמות",r.servings)}${fact("מצרכים",(r.ingredients||[]).filter(t=>!/[:：]$/.test(t)).length||"")}</div>
       <div class="recipe-body">
-        <section><div class="h4">מצרכים</div><div class="index"><ul class="ing">${ing||"<li>—</li>"}</ul></div>
+        <section><div class="h4">מצרכים</div>${scaler}<div class="index"><ul class="ing">${ing||"<li>—</li>"}</ul></div>
           ${(r.ingredients||[]).length?`<div class="keep-row"><button class="btn ghost keep" id="keep" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#f6b400" d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path fill="#fff" d="M12 7a4 4 0 0 0-2.2 7.3V16h4.4v-1.7A4 4 0 0 0 12 7zm-2 10h4v1.2a.8.8 0 0 1-.8.8h-2.4a.8.8 0 0 1-.8-.8z"/></svg>יצירת רשימה ב-Keep</button><span class="hint live" id="keepMsg" aria-live="polite"></span></div>`:""}
         </section>
         <section><div class="h4">ההכנה</div><ol class="steps" id="steps">${steps||"<li>—</li>"}</ol></section>
@@ -436,7 +504,21 @@ function openRecipe(id){
       <div class="row-btns"><button class="btn ghost" id="cook">מסך דלוק בזמן בישול</button><button class="btn ghost" id="edit">עריכה</button><span id="delWrap"><button class="btn ghost" id="del">מחיקה</button></span></div></div>
     </div>`);
   $("#steps").onclick=e=>{const li=e.target.closest("li");if(li)li.classList.toggle("done");};
-  if($("#keep"))$("#keep").onclick=()=>toKeep(r);
+  if($("#keep"))$("#keep").onclick=()=>toKeep({...r,ingredients:lines()});
+  if($("#sNum")){
+    const apply=()=>{
+      const checked=[...document.querySelectorAll("ul.ing input:checked")].map(x=>x.id);
+      $("ul.ing").innerHTML=ingHtml();checked.forEach(id=>{const c=document.getElementById(id);if(c)c.checked=true;});
+      if(base.n)$("#sNum").value=amount;else $("#sNum").textContent=`×${fmtNum(k)}`;
+      $("#sReset").hidden=$("#sHint").hidden=k===1;
+    };
+    const step=base.n>12?Math.max(1,Math.round(base.n/4)):1;
+    const set=v=>{if(base.n){amount=Math.max(1,Math.min(999,Math.round(v)||base.n));k=amount/base.n;}else{k=v;}apply();};
+    $("#sPlus").onclick=()=>base.n?set(amount+step):set(MULTS[Math.min(MULTS.length-1,MULTS.indexOf(k)+1)]);
+    $("#sMinus").onclick=()=>base.n?set(amount-step):set(MULTS[Math.max(0,MULTS.indexOf(k)-1)]);
+    $("#sReset").onclick=()=>set(base.n||1);
+    if(base.n)$("#sNum").onchange=e=>set(+e.target.value);
+  }
   $("#fav").onclick=()=>toggleFav(r);
   $("#edit").onclick=()=>openForm(r);
   $("#del").onclick=()=>{$("#delWrap").innerHTML=`<span class="row-btns">למחוק לצמיתות? <button class="btn warn" id="yes">מחיקה</button><button class="btn ghost" id="no">ביטול</button></span>`;
