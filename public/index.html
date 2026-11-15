@@ -233,6 +233,20 @@ ul.ing li.scaled span{color:var(--eggplant);font-weight:700}
 .confirm-box h3{margin:0;font-family:var(--display);font-weight:700;font-size:2rem;line-height:1;text-wrap:balance}
 .confirm-box p{margin:0;color:var(--muted)}
 .confirm-box .row-btns{margin-top:6px}
+.tmr{display:inline-flex;align-items:center;gap:4px;vertical-align:baseline;border:2px solid var(--cat,var(--eggplant));background:var(--card);color:var(--ink);border-radius:999px;padding:1px 10px 1px 8px;margin:0 2px;font:inherit;font-weight:800;cursor:pointer;line-height:1.5}
+.tmr svg{width:16px;height:16px;color:var(--cat,var(--eggplant))}
+.tmr:hover{background:var(--soft)}
+.tmr.scaled{border-style:dashed}
+.timers{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);z-index:25;display:flex;flex-direction:column;gap:8px;max-width:560px;margin-inline:auto}
+.timer{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--ink);color:var(--paper);border-radius:16px;padding:10px 14px;box-shadow:0 12px 30px -10px rgba(0,0,0,.5)}
+.timer.done{background:var(--danger);color:#fff;animation:pulse 1s steps(2,jump-none) infinite}
+.t-main{display:flex;flex-direction:column;min-width:0}
+.t-label{font-size:.8rem;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-clock{font-size:1.6rem;font-variant-numeric:tabular-nums;line-height:1.1}
+.t-btns{display:flex;gap:6px;flex:none}
+.t-btns button{border:0;border-radius:999px;min-width:40px;height:40px;padding:0 12px;background:rgba(255,255,255,.18);color:inherit;font-weight:800;cursor:pointer}
+@keyframes pulse{50%{background:#8f2a1c}}
+@media (prefers-reduced-motion:reduce){.timer.done{animation:none}}
 .keep-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:14px}
 .keep{display:inline-flex;align-items:center;gap:8px}
 .keep svg{width:20px;height:20px;flex:none}
@@ -476,6 +490,86 @@ function baseServings(text){
 /* An ingredient "has an amount" when it carries a number, a fraction or a kitchen measure word. */
 const hasAmount=t=>/[\d½⅓⅔¼¾⅛]|חצי|רבע|שליש|קורט|קמצוץ|מעט|לפי הטעם|צרור|חופן|שפע|בינוני|גדול|קטנ|שלם|אחד|אחת|שני|שתי|שלוש|ארבע|כף|כפית|כוס|שקית|חבילה|קופסה|פחית|ענף|גבעול|שן |שיני|פרוס|אופציונלי|לא חובה/.test(t);
 const missingAmounts=r=>(r.ingredients||[]).length>0&&((r.ingredients||[]).some(t=>!/[:：]$/.test(t)&&!hasAmount(t))||!(r.servings||"").trim());
+/* Cooking times in a step: "15 דקות", "40-45 דקות", "שעה וחצי", "3-4 שעות", "כחצי שעה", "10 minutes". */
+const TNUM=String.raw`\d+(?:[.,]\d+)?|[½¼¾]`;
+const TIME_RE=new RegExp(String.raw`(?:(${TNUM})\s*(?:-|–|עד)\s*)?(${TNUM})\s*(דקות|דקה|דק'|שעות|שעה|שניות|minutes?|mins?|hours?|hrs?)(\s+וחצי)?|(?<![\p{L}])(?:[לבכ]-?)?(?:כ-?)?(שעתיים|שעה\s+וחצי|חצי\s+שעה|רבע\s+שעה|שלושת\s+רבעי\s+שעה|שעה)(?![\p{L}])`,"gu");
+const tnum=t=>t==="½"?0.5:t==="¼"?0.25:t==="¾"?0.75:+String(t).replace(",",".");
+function findTimes(text){
+  const out=[];let m;TIME_RE.lastIndex=0;
+  while((m=TIME_RE.exec(text))){
+    let sec;
+    if(m[5]){sec={"שעתיים":7200,"חצי שעה":1800,"רבע שעה":900,"שלושת רבעי שעה":2700,"שעה":3600}[m[5].replace(/\s+/g," ")]??(/וחצי/.test(m[5])?5400:3600);}
+    else{const unit=m[3];const mult=/שעה|שעות|hour|hr/.test(unit)?3600:/שני/.test(unit)?1:60;
+      const v=tnum(m[1]??m[2])+(m[4]?0.5:0);sec=Math.round(v*mult);}
+    // "12 שעות" of soaking or a fridge night is not something to time on a stove; skip over 6 hours
+    if(sec>0&&sec<=6*3600)out.push({start:m.index,end:m.index+m[0].length,sec,text:m[0]});
+  }
+  return out;
+}
+/* Longer cooking takes a little longer for a bigger batch: ×2 → about a quarter more. Short steps stay. */
+const scaleTime=(sec,k)=>k===1||sec<20*60?sec:Math.max(20*60,Math.round(sec*Math.cbrt(k)/300)*300);
+function fmtDur(sec){
+  if(sec<60)return `${sec} שניות`;
+  const h=Math.floor(sec/3600),m=Math.round(sec%3600/60);
+  if(!h)return `${m} דקות`;
+  const hh=h===1?"שעה":h===2?"שעתיים":`${h} שעות`;
+  return m===30?`${hh} וחצי`:m===15?`${hh} ורבע`:m?`${hh} ו-${m} דקות`:hh;
+}
+const clock=s=>{s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return (h?`${h}:${String(m).padStart(2,"0")}`:`${m}`)+`:${String(x).padStart(2,"0")}`;};
+
+/* Kitchen timers: a bar at the bottom of the screen that stays while you move between recipes.
+   Times are kept as end moments, so a timer stays right when the phone sleeps or the page reloads. */
+const TIMER_ICON=`<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 9v4l2.5 2M9.5 2.5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+let timers=[],timerTick=null,audioCtx=null,beepLoop=null;
+try{timers=JSON.parse(localStorage.getItem("recipes.timers")||"[]").filter(t=>t&&t.id);}catch{}
+const saveTimers=()=>{try{localStorage.setItem("recipes.timers",JSON.stringify(timers));}catch{}};
+const left=t=>t.paused!=null?t.paused:(t.end-Date.now())/1000;
+function startTimer(sec,label){
+  try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();audioCtx.resume();}catch{}
+  timers.push({id:Date.now()+Math.random(),label,total:sec,end:Date.now()+sec*1000,paused:null,done:false});
+  saveTimers();drawTimers();
+  if(!wakeLock&&navigator.wakeLock)navigator.wakeLock.request("screen").then(w=>{wakeLock=w;}).catch(()=>{});
+}
+function beep(){
+  if(!audioCtx)return;
+  try{const t0=audioCtx.currentTime;[0,.25,.5].forEach(d=>{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.frequency.value=880;o.connect(g);g.connect(audioCtx.destination);
+    g.gain.setValueAtTime(.0001,t0+d);g.gain.exponentialRampToValueAtTime(.4,t0+d+.02);g.gain.exponentialRampToValueAtTime(.0001,t0+d+.2);o.start(t0+d);o.stop(t0+d+.22);});}catch{}
+}
+function ring(on){
+  if(on&&!beepLoop){beep();try{navigator.vibrate&&navigator.vibrate([400,200,400,200,400]);}catch{}
+    let n=0;beepLoop=setInterval(()=>{beep();if(++n%3===0)try{navigator.vibrate&&navigator.vibrate([400,200,400]);}catch{};if(n>90)ring(false);},1500);}
+  if(!on&&beepLoop){clearInterval(beepLoop);beepLoop=null;}
+}
+function drawTimers(){
+  let dock=$("#timers");
+  if(!timers.length){if(dock)dock.remove();clearInterval(timerTick);timerTick=null;ring(false);document.title=BASE_TITLE;return;}
+  if(!dock){dock=document.createElement("div");dock.id="timers";dock.className="timers";dock.setAttribute("aria-live","polite");document.body.appendChild(dock);
+    dock.onclick=e=>{const b=e.target.closest("[data-act]");if(!b)return;const t=timers.find(x=>String(x.id)===b.dataset.id);if(!t)return;
+      if(b.dataset.act==="stop")timers=timers.filter(x=>x!==t);
+      else if(b.dataset.act==="pause"){if(t.paused==null)t.paused=left(t);else{t.end=Date.now()+t.paused*1000;t.paused=null;}}
+      else if(b.dataset.act==="plus"){if(t.done){t.done=false;t.end=Date.now()+60000;}else if(t.paused!=null)t.paused+=60;else t.end+=60000;}
+      saveTimers();drawTimers();};}
+  for(const t of timers)if(!t.done&&left(t)<=0){t.done=true;saveTimers();}
+  const ringing=timers.some(t=>t.done);
+  // Rebuild the bar only when a timer is added, removed, paused or done; otherwise just update the clocks,
+  // so a tap on a button is never lost to a redraw.
+  const shape=timers.map(t=>`${t.id}:${t.done}:${t.paused!=null}`).join("|");
+  if(dock.dataset.shape===shape){
+    dock.querySelectorAll(".timer").forEach((el,i)=>{const t=timers[i];if(t&&!t.done)el.querySelector(".t-clock").textContent=clock(left(t));});
+  }else{
+  dock.dataset.shape=shape;
+  dock.innerHTML=timers.map(t=>{const s=left(t);
+    return `<div class="timer${t.done?" done":""}"><div class="t-main"><span class="t-label">${esc(t.label)}</span><b class="t-clock">${t.done?"הזמן נגמר!":clock(s)}</b></div>
+      <div class="t-btns">${t.done?"":`<button type="button" data-act="pause" data-id="${t.id}" aria-label="${t.paused!=null?"המשך":"השהיה"}">${t.paused!=null?"▶":"❚❚"}</button>`}
+      <button type="button" data-act="plus" data-id="${t.id}" aria-label="עוד דקה">+1</button>
+      <button type="button" data-act="stop" data-id="${t.id}" aria-label="${t.done?"עצירה":"ביטול הטיימר"}">${t.done?"עצירה":"✕"}</button></div></div>`;}).join("");
+  }
+  ring(ringing);
+  const next=timers.filter(t=>!t.done).sort((a,b)=>left(a)-left(b))[0];
+  document.title=ringing?"⏰ הזמן נגמר!":next?`${clock(left(next))} · ${BASE_TITLE}`:BASE_TITLE;
+  if(!timerTick)timerTick=setInterval(drawTimers,1000);
+}
+const BASE_TITLE=document.title;
 function openRecipe(id){
   const r=recipes.find(x=>x.id===id);if(!r)return;
   const[bg]=styleOf(r.category);const ts=terms();
@@ -494,8 +588,17 @@ function openRecipe(id){
         ${base.n?`<input id="sNum" type="number" inputmode="numeric" min="1" max="999" value="${base.n}" aria-label="מספר ${esc(base.unit)}">`:`<output id="sNum">×1</output>`}
         <button type="button" id="sPlus" aria-label="יותר">+</button></div>
       <button type="button" class="linkbtn" id="sReset" hidden>חזרה ל${base.n?`-${base.n}`:"כמות המקורית"}</button>
-      <span class="hint" id="sHint" hidden>הכמויות בשלבי ההכנה לא משתנות.</span></div>`:"";
-  const steps=(r.steps||[]).map(t=>`<li><span>${hl(t,ts)}</span></li>`).join("");
+      <span class="hint" id="sHint" hidden>זמני בישול ואפייה ארוכים הותאמו לכמות. בדקו מוכנות לפני שמוציאים.</span></div>`:"";
+  // Steps with a timer button on every cooking time; long times follow the chosen amount.
+  const stepsHtml=()=>(r.steps||[]).map((t,i)=>{
+    const found=findTimes(t);let html="",at=0;
+    for(const f of found){
+      const sec=scaleTime(f.sec,k),changed=sec!==f.sec;
+      html+=hl(t.slice(at,f.start),ts)+`<button type="button" class="tmr${changed?" scaled":""}" data-sec="${sec}" data-label="${esc(`${r.title} · שלב ${i+1}`)}"${changed?` title="במקור ${esc(f.text)}"`:""}>${TIMER_ICON}${esc(changed?fmtDur(sec):f.text)}</button>`;
+      at=f.end;
+    }
+    return `<li><span>${html+hl(t.slice(at),ts)}</span></li>`;}).join("");
+  const steps=stepsHtml();
   const fact=(k,v)=>v?`<div><small>${k}</small><b>${esc(v)}</b></div>`:"";
   shell(`<div class="head${r.photo?" has-photo":""}" style="${headVars(r.category)}${photoStyle(r,false)}"><span class="glyph" aria-hidden="true">${esc(initial(r.title))}</span>
       <button class="star-btn ${r.fav?"on":""}" id="fav" type="button" aria-pressed="${!!r.fav}" aria-label="${r.fav?"הסרה מהמועדפים":"הוספה למועדפים"}" title="${r.fav?"הסרה מהמועדפים":"הוספה למועדפים"}">${STAR}</button>
@@ -514,7 +617,9 @@ function openRecipe(id){
       <div class="sheet-foot"><div>${r.source?(isVideo(r.source)?`<a class="btn ghost watch" href="${esc(r.source)}" target="_blank" rel="noopener">▶ צפייה ברילז</a>`:`מקור: <a href="${esc(r.source)}" target="_blank" rel="noopener">${esc(shortUrl(r.source))}</a>`):""}</div>
       <div class="row-btns"><button class="btn ghost" id="cook">מסך דלוק בזמן בישול</button><button class="btn ghost" id="edit">עריכה</button><span id="delWrap"><button class="btn ghost" id="del">מחיקה</button></span></div></div>
     </div>`);
-  $("#steps").onclick=e=>{const li=e.target.closest("li");if(li)li.classList.toggle("done");};
+  $("#steps").onclick=e=>{
+    const tb=e.target.closest(".tmr");if(tb){startTimer(+tb.dataset.sec,tb.dataset.label);return;}
+    const li=e.target.closest("li");if(li)li.classList.toggle("done");};
   if($("#keep"))$("#keep").onclick=()=>toKeep({...r,ingredients:lines()});
   if($("#sNum")){
     const apply=()=>{
@@ -522,6 +627,8 @@ function openRecipe(id){
       $("ul.ing").innerHTML=ingHtml();checked.forEach(id=>{const c=document.getElementById(id);if(c)c.checked=true;});
       if(base.n)$("#sNum").value=amount;else $("#sNum").textContent=`×${fmtNum(k)}`;
       $("#sReset").hidden=$("#sHint").hidden=k===1;
+      const done=[...document.querySelectorAll("#steps li")].map(li=>li.classList.contains("done"));
+      $("#steps").innerHTML=stepsHtml();document.querySelectorAll("#steps li").forEach((li,i)=>li.classList.toggle("done",!!done[i]));
     };
     const step=base.n>12?Math.max(1,Math.round(base.n/4)):1;
     const set=v=>{if(base.n){amount=Math.max(1,Math.min(999,Math.round(v)||base.n));k=amount/base.n;}else{k=v;}apply();};
@@ -591,7 +698,7 @@ function confirmBox(title,text,okLabel){
     el.querySelector("#cNo").focus();
   });
 }
-function releaseWake(){try{wakeLock&&wakeLock.release();}catch{}wakeLock=null;}
+function releaseWake(){if(typeof timers!=="undefined"&&timers.some(t=>!t.done))return; /* keep the screen on while a timer runs */try{wakeLock&&wakeLock.release();}catch{}wakeLock=null;}
 const isVideo=u=>{try{return /(^|\.)(instagram\.com|tiktok\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch)$/.test(new URL(u).hostname);}catch{return false;}};
 function shortUrl(u){try{return new URL(u).hostname.replace(/^www\./,"");}catch{return u;}}
 
@@ -722,7 +829,7 @@ async function enter(pw){
     if(!res.ok)throw new Error(out.error==="no_password_configured"?"עוד לא הוגדרה סיסמה משפחתית באתר.":"לא הצלחתי לטעון את הספר.");
     try{localStorage.setItem("recipes.pw",pw);}catch{}
     recipes=out.recipes.map(index);ready=true;
-    $("#login").hidden=true;$("#app").hidden=false;render();
+    $("#login").hidden=true;$("#app").hidden=false;render();if(timers.length)drawTimers();
     if(shared&&!enter.used){enter.used=true;openForm(null);$("#fUrl").value=shared;$("#readUrl").click();}
   }catch(e){showLogin(e.message||"אין חיבור לאינטרנט. נסו שוב.");}
   finally{$("#loginBtn").disabled=false;}
