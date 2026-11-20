@@ -223,6 +223,7 @@ img{max-width:100%}
 .pickle-q select{background:var(--card);border:2px solid var(--line);border-radius:999px;padding:7px 12px;font:inherit;font-weight:800}
 .pcs-w{display:inline-flex;align-items:center;gap:6px;font-size:.9rem}
 .pcs-w input{width:5em;background:var(--card);border:2px solid var(--line);border-radius:10px;padding:5px 8px;font:inherit}
+.salt-reset{align-self:flex-start;padding:0;order:0}
 .salt-amt{font-weight:700;color:var(--muted);font-size:.92rem}
 .salt{margin-top:16px;background:var(--card);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px;display:flex;flex-direction:column;gap:10px;border-inline-start:6px solid #6b7f1a}
 .salt .h5{font-family:var(--display);font-weight:700;font-size:1.6rem;line-height:1}
@@ -671,6 +672,7 @@ function openRecipe(id){
             <div class="salt-amt" id="pAmtShow"></div>
             <div class="seg salt-seg" role="group" aria-label="שיטת כבישה"><button type="button" data-m="brine">תמלחת (מי מלח)</button><button type="button" data-m="dry">המלחה יבשה</button></div>
             <div class="salt-row"><label for="pPct">אחוז מלח</label><select id="pPct"></select></div>
+            <button type="button" class="linkbtn salt-reset" id="pReset" hidden></button>
             <div class="salt-row" id="pWaterRow"><label for="pWater">מים (ליטר)</label><input id="pWater" type="number" inputmode="decimal" min="0" step="0.1"></div>
             <div class="salt-out" id="pOut" aria-live="polite"></div>
             <p class="hint" id="pNote"></p>
@@ -739,12 +741,16 @@ function openRecipe(id){
      Dry salting: a percentage of the vegetables' weight. 1 tablespoon ≈ 18 g fine salt, ≈ 15 g coarse salt. */
   const PCTS={brine:[2,3,3.5,4,5,6],dry:[1.5,2,2.5,3]};
   let saltMode="brine",waterTouched=false;
-  try{saltMode=localStorage.getItem("recipes.saltMode")||"brine";}catch{}
   // A recipe that names its own rate ("2% ממשקל הכרוב" = dry salting, "תמלחת 3%" = brine) starts there.
   const rtext=[...(r.ingredients||[]),...(r.steps||[]),r.notes].join(" ");
   const dryM=rtext.match(/(\d+(?:[.,]\d+)?)\s*%\s*(?:מ|ממשקל|of the)/), brineM=rtext.match(/(?:תמלחת|מי מלח|brine)[^.%]{0,30}?(\d+(?:[.,]\d+)?)\s*%/);
   let recipePct=0;
   if(dryM){saltMode="dry";recipePct=readNum(dryM[1]);}else if(brineM){saltMode="brine";recipePct=readNum(brineM[1]);}
+  // The recipe's own setting is the "original"; a change made here is remembered for this recipe only.
+  const ORIG={mode:saltMode,pct:recipePct||(saltMode==="brine"?4:2)}, SALT_KEY=`recipes.salt.${r.id}`;
+  let savedPct=0;
+  try{const v=JSON.parse(localStorage.getItem(SALT_KEY)||"null");if(v&&PCTS[v.mode]){saltMode=v.mode;savedPct=+v.pct||0;}}catch{}
+  const saveSalt=()=>{try{localStorage.setItem(SALT_KEY,JSON.stringify({mode:saltMode,pct:+$("#pPct").value}));}catch{}};
   function vegKg(){return typeof pickleKg==="function"?pickleKg():0;}
   function drawSalt(){
     if(!$("#salt"))return;
@@ -761,13 +767,21 @@ function openRecipe(id){
       ?`המלח מחושב לפי משקל המים (${pct}% = ${pct*10} גרם לליטר). כמות המים היא הערכה לצנצנת מלאה, כ-0.6 ליטר לכל ק"ג ירקות; אפשר לשנות.`
       :`המלח מחושב לפי משקל הירקות (${pct}% = ${pct*10} גרם לכל ק"ג), כמו בכרוב כבוש.`;
   }
-  function fillPct(){const keep=+$("#pPct").value||recipePct;const opts=[...new Set([...PCTS[saltMode],...(recipePct?[recipePct]:[])])].sort((a,b)=>a-b);const def=saltMode==="brine"?4:2;
+  function fillPct(){const rp=saltMode===ORIG.mode?recipePct:0;const keep=+$("#pPct").value||savedPct||rp;const opts=[...new Set([...PCTS[saltMode],...(rp?[rp]:[])])].sort((a,b)=>a-b);const def=saltMode==="brine"?4:2;
     $("#pPct").innerHTML=opts.map(p=>`<option value="${p}">${p}%</option>`).join("");$("#pPct").value=opts.includes(keep)?keep:def;}
   if($("#salt")){
-    fillPct();drawSalt();
-    $("#pPct").oninput=drawSalt;
-    $("#pWater").oninput=()=>{waterTouched=true;drawSalt();};
-    document.querySelector(".salt-seg").onclick=e=>{const b=e.target.closest("[data-m]");if(!b)return;saltMode=b.dataset.m;try{localStorage.setItem("recipes.saltMode",saltMode);}catch{}fillPct();drawSalt();};
+    fillPct();
+    // One tap brings back the recipe's own method and rate, and the estimated water.
+    const orig=ORIG;
+    const showReset=()=>{const same=saltMode===orig.mode&&+$("#pPct").value===orig.pct&&!waterTouched;
+      $("#pReset").hidden=same;
+      $("#pReset").textContent=`חזרה ל${orig.mode==="dry"?"המלחה יבשה":"תמלחת"} ${orig.pct}%${orig.mode==="brine"&&waterTouched?" וכמות המים המשוערת":""}`;};
+    const redraw=()=>{drawSalt();showReset();};
+    redraw();
+    $("#pPct").oninput=()=>{saveSalt();redraw();};
+    $("#pWater").oninput=()=>{waterTouched=true;redraw();};
+    document.querySelector(".salt-seg").onclick=e=>{const b=e.target.closest("[data-m]");if(!b)return;saltMode=b.dataset.m;savedPct=0;$("#pPct").value="";fillPct();saveSalt();redraw();};
+    $("#pReset").onclick=()=>{saltMode=orig.mode;savedPct=0;waterTouched=false;$("#pPct").value="";fillPct();$("#pPct").value=orig.pct;try{localStorage.removeItem(SALT_KEY);}catch{}redraw();};
   }
   $("#fav").onclick=()=>toggleFav(r);
   if($("#fillAmt"))$("#fillAmt").onclick=async()=>{
