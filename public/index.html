@@ -220,6 +220,10 @@ img{max-width:100%}
 .paste-box{margin-top:10px}
 .video-note{margin-top:14px;font-size:.95rem}
 .watch{text-decoration:none!important;display:inline-flex;align-items:center;gap:6px}
+.pickle-q select{background:var(--card);border:2px solid var(--line);border-radius:999px;padding:7px 12px;font:inherit;font-weight:800}
+.pcs-w{display:inline-flex;align-items:center;gap:6px;font-size:.9rem}
+.pcs-w input{width:5em;background:var(--card);border:2px solid var(--line);border-radius:10px;padding:5px 8px;font:inherit}
+.salt-amt{font-weight:700;color:var(--muted);font-size:.92rem}
 .salt{margin-top:16px;background:var(--card);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px;display:flex;flex-direction:column;gap:10px;border-inline-start:6px solid #6b7f1a}
 .salt .h5{font-family:var(--display);font-weight:700;font-size:1.6rem;line-height:1}
 .salt-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
@@ -493,6 +497,22 @@ function scaleLine(line,k){
 }
 /* The recipe's base amount and what it counts: "כ-6 מנות" → 6 סועדים, "כ-40 ריבועים" → 40 ריבועים. */
 const isPickle=r=>/כבוש|כבישה|חמוצ|pickl/i.test(r.category||"");
+/* How much vegetable the pickle recipe is written for: a weight in grams and/or a count.
+   Looks at "כמות" first, then at the ingredients (skipping salt, water, sugar, vinegar, oil). */
+const KG_RE=/(\d+(?:[.,]\d+)?|[½¼¾])\s*(?:ק"ג|ק״ג|קילו(?:גרם)?|קג|kg)/i, G_RE=/(\d+(?:[.,]\d+)?)\s*(?:גרם|גר'|ג'|gr?)(?![\p{L}])/iu;
+function pickleBase(r){
+  const weight=t=>{let m=String(t||"").match(KG_RE);if(m)return readNum(m[1])*1000;m=String(t||"").match(G_RE);return m?readNum(m[1]):0;};
+  const NOT_VEG=/מלח|מים|סוכר|חומץ|שמן|תבלין|פלפל שחור|שום/;
+  let g=weight(r.servings);
+  const ings=(r.ingredients||[]).filter(t=>!/[:：]$/.test(t));
+  if(!g)for(const t of ings)if(!NOT_VEG.test(t)&&(g=weight(t)))break;
+  let pcs=0,word="";
+  const cnt=t=>{const m=String(t||"").match(/^\D{0,3}?(\d+)\s+([\p{L}"׳']+)/u);return m&&!/^(ק"ג|קילו|גרם|ליטר|כוסות?|כפות?|כפיות?|צנצנות?|מ"ל)$/.test(m[2])?[+m[1],m[2]]:null;};
+  let c=cnt(r.servings);
+  if(!c)for(const t of ings)if(!NOT_VEG.test(t)&&(c=cnt(t)))break;
+  if(c){pcs=c[0];word=c[1];}
+  return {g,pcs,word};
+}
 function baseServings(text,pickle){
   const t=String(text||"");
   if(pickle){
@@ -608,7 +628,19 @@ function openRecipe(id){
     const [txt,changed]=scaleLine(t,k);
     return `<li${changed?' class="scaled"':""}><label><input type="checkbox" id="ing${i}"><span>${k===1?hl(t,ts):esc(txt)}</span></label></li>`;}).join("");
   const ing=ingHtml();
-  const scaler=(r.ingredients||[]).length?`<div class="scaler">
+  const UNIT_G={"מלפפון":100,"לימון":120,"גזר":100,"פלפל":150,"חציל":250,"כרובית":800,"כרוב":1200,"לפת":200,"צנון":300,"סלק":200,"זית":5,"עגבני":120,"בצל":150,"שום":50,"קולורבי":250};
+  const guessG=()=>{const t=norm([r.title,r.servings,...(r.ingredients||[])].join(" "));for(const w in UNIT_G)if(t.includes(norm(w)))return UNIT_G[w];return 100;};
+  const pb=pickle?pickleBase(r):null;
+  const scaler=pickle?`<div class="scaler pickle-q">
+      <span class="lbl-like">כמות ירקות</span>
+      <div class="stepper"><button type="button" id="sMinus" aria-label="פחות">−</button>
+        <input id="sNum" type="number" inputmode="decimal" min="0" step="any" aria-label="כמות ירקות">
+        <button type="button" id="sPlus" aria-label="יותר">+</button></div>
+      <select id="sUnit" aria-label="יחידת מידה"><option value="g">גרם</option><option value="kg">ק"ג</option><option value="pcs">${esc(pb.word||"יחידות")}</option></select>
+      <span class="pcs-w" id="sPcsW" hidden><label for="pPcs">משקל יחידה</label><input id="pPcs" type="number" inputmode="numeric" min="1" step="1"> גרם</span>
+      <button type="button" class="linkbtn" id="sReset" hidden>חזרה לכמות במתכון</button>
+      <span class="hint" id="sHint" ${pb.g||pb.pcs?"hidden":""}>${pb.g||pb.pcs?"":"כדי שגם המצרכים יתעדכנו, כתבו במתכון בשדה ״כמות״ את משקל הירקות, למשל 2 ק״ג מלפפונים."}</span></div>`
+    :(r.ingredients||[]).length?`<div class="scaler">
       <span class="lbl-like" id="sLbl">${base.n?`כמה ${esc(base.unit)}?`:"כמות:"}</span>
       <div class="stepper"><button type="button" id="sMinus" aria-label="פחות">−</button>
         ${base.n?`<input id="sNum" type="number" inputmode="${base.kg?"decimal":"numeric"}" step="${base.kg?"0.25":"1"}" min="${base.kg?"0.25":"1"}" max="999" value="${base.n}" aria-label="מספר ${esc(base.unit)}">`:`<output id="sNum">×1</output>`}
@@ -636,10 +668,7 @@ function openRecipe(id){
         <section><div class="h4">מצרכים</div>${scaler}<div class="index"><ul class="ing">${ing||"<li>—</li>"}</ul></div>
           ${pickle?`<div class="salt" id="salt">
             <div class="h5">מחשבון מלח לכבישה</div>
-            <div class="salt-row"><label for="pAmt">כמות ירקות</label>
-              <div class="salt-inline"><input id="pAmt" type="number" inputmode="decimal" min="0" step="any">
-                <select id="pUnit" aria-label="יחידת מידה"><option value="kg">ק"ג</option><option value="pcs">יחידות</option></select></div></div>
-            <div class="salt-row" id="pPcsRow" hidden><label for="pPcs">משקל יחידה (גרם)</label><input id="pPcs" type="number" inputmode="numeric" min="1" step="1"></div>
+            <div class="salt-amt" id="pAmtShow"></div>
             <div class="seg salt-seg" role="group" aria-label="שיטת כבישה"><button type="button" data-m="brine">תמלחת (מי מלח)</button><button type="button" data-m="dry">המלחה יבשה</button></div>
             <div class="salt-row"><label for="pPct">אחוז מלח</label><select id="pPct"></select></div>
             <div class="salt-row" id="pWaterRow"><label for="pWater">מים (ליטר)</label><input id="pWater" type="number" inputmode="decimal" min="0" step="0.1"></div>
@@ -659,7 +688,38 @@ function openRecipe(id){
     const tb=e.target.closest(".tmr");if(tb){startTimer(+tb.dataset.sec,tb.dataset.label);return;}
     const li=e.target.closest("li");if(li)li.classList.toggle("done");};
   if($("#keep"))$("#keep").onclick=()=>toKeep({...r,ingredients:lines()});
-  if($("#sNum")){
+  if(pickle){
+    // One amount, kept in grams, drives the ingredients and the salt calculator.
+    const unitG=()=>+$("#pPcs").value||guessG();
+    const baseG=pb.g||(pb.pcs?pb.pcs*guessG():0);
+    let curG=baseG||1000;
+    let unit=pb.g?(pb.g>=1000?"kg":"g"):pb.pcs?"pcs":"kg";
+    try{const u=localStorage.getItem("recipes.pickleUnit");if(u&&(u!=="pcs"||pb.pcs))unit=u;}catch{}
+    const toUnit=g=>unit==="kg"?g/1000:unit==="g"?g:g/unitG();
+    const fromUnit=v=>unit==="kg"?v*1000:unit==="g"?v:v*unitG();
+    const stepU=()=>unit==="kg"?0.5:unit==="g"?100:1;
+    const show=()=>{const v=toUnit(curG);$("#sNum").value=unit==="pcs"?Math.round(v*10)/10:unit==="kg"?+v.toFixed(2):Math.round(v);
+      $("#sUnit").value=unit;$("#sPcsW").hidden=unit!=="pcs";};
+    var pickleApply=()=>{
+      k=baseG?curG/baseG:1;
+      const checked=[...document.querySelectorAll("ul.ing input:checked")].map(x=>x.id);
+      $("ul.ing").innerHTML=ingHtml();checked.forEach(id=>{const c=document.getElementById(id);if(c)c.checked=true;});
+      $("#sReset").hidden=!baseG||Math.abs(curG-baseG)<1;
+      const done=[...document.querySelectorAll("#steps li")].map(li=>li.classList.contains("done"));
+      $("#steps").innerHTML=stepsHtml();document.querySelectorAll("#steps li").forEach((li,i)=>li.classList.toggle("done",!!done[i]));
+      drawSalt();
+    };
+    var pickleKg=()=>curG/1000;
+    $("#pPcs").value=guessG();
+    const setG=g=>{curG=Math.max(1,Math.min(999000,g||curG));show();pickleApply();};
+    $("#sPlus").onclick=()=>setG(fromUnit(Math.round((toUnit(curG)+stepU())/stepU())*stepU()));
+    $("#sMinus").onclick=()=>{const v=Math.round((toUnit(curG)-stepU())/stepU())*stepU();if(v>0)setG(fromUnit(v));};
+    $("#sNum").onchange=e=>{const v=+e.target.value;if(v>0)setG(fromUnit(v));else show();};
+    $("#sUnit").onchange=e=>{unit=e.target.value;try{localStorage.setItem("recipes.pickleUnit",unit);}catch{}show();drawSalt();};
+    $("#pPcs").oninput=()=>{if(unit==="pcs")setG(fromUnit(+$("#sNum").value||0));};
+    $("#sReset").onclick=()=>setG(baseG);
+    show();
+  }else if($("#sNum")){
     const apply=()=>{
       const checked=[...document.querySelectorAll("ul.ing input:checked")].map(x=>x.id);
       $("ul.ing").innerHTML=ingHtml();checked.forEach(id=>{const c=document.getElementById(id);if(c)c.checked=true;});
@@ -669,7 +729,7 @@ function openRecipe(id){
       $("#steps").innerHTML=stepsHtml();document.querySelectorAll("#steps li").forEach((li,i)=>li.classList.toggle("done",!!done[i]));
     };
     const step=base.kg?0.5:base.n>12?Math.max(1,Math.round(base.n/4)):1;
-    const set=v=>{if(base.n){amount=base.kg?Math.max(0.25,Math.min(999,Math.round((v||base.n)*4)/4)):Math.max(1,Math.min(999,Math.round(v)||base.n));k=amount/base.n;}else{k=v;}apply();if(pickle)syncSalt();};
+    const set=v=>{if(base.n){amount=Math.max(1,Math.min(999,Math.round(v)||base.n));k=amount/base.n;}else{k=v;}apply();};
     $("#sPlus").onclick=()=>base.n?set(amount+step):set(MULTS[Math.min(MULTS.length-1,MULTS.indexOf(k)+1)]);
     $("#sMinus").onclick=()=>base.n?set(amount-step):set(MULTS[Math.max(0,MULTS.indexOf(k)-1)]);
     $("#sReset").onclick=()=>set(base.n||1);
@@ -677,17 +737,21 @@ function openRecipe(id){
   }
   /* Salt for pickling. Brine: salt is a percentage of the water's weight (1 L = 1 kg).
      Dry salting: a percentage of the vegetables' weight. 1 tablespoon ≈ 18 g fine salt, ≈ 15 g coarse salt. */
-  const UNIT_G={"מלפפון":100,"לימון":120,"גזר":100,"פלפל":150,"חציל":250,"כרובית":800,"כרוב":1200,"לפת":200,"צנון":300,"סלק":200,"זית":5,"עגבני":120,"בצל":150,"שום":50,"קולורבי":250};
-  const guessG=()=>{const t=norm([r.title,r.servings,...(r.ingredients||[])].join(" "));for(const w in UNIT_G)if(t.includes(norm(w)))return UNIT_G[w];return 100;};
   const PCTS={brine:[2,3,3.5,4,5,6],dry:[1.5,2,2.5,3]};
   let saltMode="brine",waterTouched=false;
   try{saltMode=localStorage.getItem("recipes.saltMode")||"brine";}catch{}
-  function vegKg(){const v=+$("#pAmt").value||0;return $("#pUnit").value==="kg"?v:v*(+$("#pPcs").value||0)/1000;}
+  // A recipe that names its own rate ("2% ממשקל הכרוב" = dry salting, "תמלחת 3%" = brine) starts there.
+  const rtext=[...(r.ingredients||[]),...(r.steps||[]),r.notes].join(" ");
+  const dryM=rtext.match(/(\d+(?:[.,]\d+)?)\s*%\s*(?:מ|ממשקל|of the)/), brineM=rtext.match(/(?:תמלחת|מי מלח|brine)[^.%]{0,30}?(\d+(?:[.,]\d+)?)\s*%/);
+  let recipePct=0;
+  if(dryM){saltMode="dry";recipePct=readNum(dryM[1]);}else if(brineM){saltMode="brine";recipePct=readNum(brineM[1]);}
+  function vegKg(){return typeof pickleKg==="function"?pickleKg():0;}
   function drawSalt(){
     if(!$("#salt"))return;
     document.querySelectorAll(".salt-seg button").forEach(b=>{b.classList.toggle("on",b.dataset.m===saltMode);b.setAttribute("aria-pressed",b.dataset.m===saltMode);});
-    $("#pWaterRow").hidden=saltMode!=="brine";$("#pPcsRow").hidden=$("#pUnit").value!=="pcs";
+    $("#pWaterRow").hidden=saltMode!=="brine";
     const kg=vegKg();
+    $("#pAmtShow").textContent=`לכמות של ${kg>=1?`${+kg.toFixed(2)} ק"ג`:`${Math.round(kg*1000)} גרם`} ירקות (מהבחירה למעלה)`;
     if(saltMode==="brine"&&!waterTouched)$("#pWater").value=kg?Math.round(kg*0.6*10)/10:"";
     const pct=+$("#pPct").value, base=saltMode==="brine"?(+$("#pWater").value||0):kg;
     const g=Math.round(base*1000*pct/100);
@@ -697,18 +761,11 @@ function openRecipe(id){
       ?`המלח מחושב לפי משקל המים (${pct}% = ${pct*10} גרם לליטר). כמות המים היא הערכה לצנצנת מלאה, כ-0.6 ליטר לכל ק"ג ירקות; אפשר לשנות.`
       :`המלח מחושב לפי משקל הירקות (${pct}% = ${pct*10} גרם לכל ק"ג), כמו בכרוב כבוש.`;
   }
-  function fillPct(){const keep=+$("#pPct").value;const opts=PCTS[saltMode];const def=saltMode==="brine"?4:2;
+  function fillPct(){const keep=+$("#pPct").value||recipePct;const opts=[...new Set([...PCTS[saltMode],...(recipePct?[recipePct]:[])])].sort((a,b)=>a-b);const def=saltMode==="brine"?4:2;
     $("#pPct").innerHTML=opts.map(p=>`<option value="${p}">${p}%</option>`).join("");$("#pPct").value=opts.includes(keep)?keep:def;}
-  function syncSalt(){ // follow the amount chosen above
-    if(!$("#salt")||!base.n)return;
-    if(base.kg){$("#pUnit").value="kg";$("#pAmt").value=+amount.toFixed(2);}else{$("#pUnit").value="pcs";$("#pAmt").value=amount;}
-    drawSalt();
-  }
   if($("#salt")){
-    $("#pPcs").value=guessG();fillPct();
-    if(base.n)syncSalt();else{$("#pAmt").value=1;drawSalt();}
-    ["pAmt","pPcs","pPct"].forEach(id=>$("#"+id).oninput=drawSalt);
-    $("#pUnit").onchange=drawSalt;
+    fillPct();drawSalt();
+    $("#pPct").oninput=drawSalt;
     $("#pWater").oninput=()=>{waterTouched=true;drawSalt();};
     document.querySelector(".salt-seg").onclick=e=>{const b=e.target.closest("[data-m]");if(!b)return;saltMode=b.dataset.m;try{localStorage.setItem("recipes.saltMode",saltMode);}catch{}fillPct();drawSalt();};
   }
