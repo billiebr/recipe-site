@@ -220,6 +220,17 @@ img{max-width:100%}
 .paste-box{margin-top:10px}
 .video-note{margin-top:14px;font-size:.95rem}
 .watch{text-decoration:none!important;display:inline-flex;align-items:center;gap:6px}
+.salt{margin-top:16px;background:var(--card);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px;display:flex;flex-direction:column;gap:10px;border-inline-start:6px solid #6b7f1a}
+.salt .h5{font-family:var(--display);font-weight:700;font-size:1.6rem;line-height:1}
+.salt-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.salt-row label{font-weight:800;font-size:.92rem}
+.salt-inline{display:flex;gap:6px}
+.salt input,.salt select{background:var(--paper);border:2px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;width:7em}
+.salt select#pUnit{width:auto}
+.salt-seg{margin:0;align-self:flex-start}
+.salt-out{display:flex;flex-direction:column;gap:2px;background:var(--soft);border-radius:10px;padding:10px 12px}
+.salt-out b{font-size:1.5rem;font-variant-numeric:tabular-nums}
+.salt .hint{margin:0;font-size:.82rem;color:var(--muted)}
 .scaler{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:-4px 0 12px}
 .stepper{display:inline-flex;align-items:center;border:2px solid var(--line);border-radius:999px;background:var(--card);overflow:hidden}
 .stepper button{border:0;background:transparent;width:40px;height:38px;font-size:1.3rem;font-weight:800;cursor:pointer;color:var(--ink)}
@@ -294,7 +305,7 @@ ul.ing li.scaled span{color:var(--eggplant);font-weight:700}
 <div id="modal"></div>
 </div>
 <script>
-const CATS=["עיקריות","מנות ראשונות","סלטים","מרקים","תוספות","מאפים ולחמים","עוגות וקינוחים","נשנושים","ארוחת בוקר","רטבים וממרחים","משקאות"];
+const CATS=["עיקריות","מנות ראשונות","סלטים","מרקים","תוספות","מאפים ולחמים","עוגות וקינוחים","נשנושים","ארוחת בוקר","רטבים וממרחים","משקאות","כבושים"];
 /* produce palette: [background, text, pattern] */
 const DOTS="radial-gradient(currentColor 2px,transparent 2.5px)";
 const STRIPES="repeating-linear-gradient(45deg,currentColor 0 3px,transparent 3px 14px)";
@@ -305,7 +316,7 @@ const STYLE={
   "עיקריות":["#d9432b","#fff8f0",DOTS],"מנות ראשונות":["#1f6f8b","#f1fbff",RINGS],"סלטים":["#4f7a28","#f6ffe9",STRIPES],
   "מרקים":["#c56a1c","#fff6ea",WAVES],"תוספות":["#7a6a3a","#fffbea",GRID],"מאפים ולחמים":["#d6a65a","#2b1d30",DOTS],
   "עוגות וקינוחים":["#c23b74","#fff1f7",RINGS],"נשנושים":["#f2c94c","#2b1d30",STRIPES],"ארוחת בוקר":["#f08a3c","#2b1d30",GRID],
-  "רטבים וממרחים":["#5b2a5e","#fbefff",WAVES],"משקאות":["#2a8c7a","#effffb",DOTS]
+  "רטבים וממרחים":["#5b2a5e","#fbefff",WAVES],"משקאות":["#2a8c7a","#effffb",DOTS],"כבושים":["#6b7f1a","#f8ffe6",STRIPES]
 };
 const EXTRA=[["#6b4c9a","#f6f0ff",RINGS],["#3b6e57","#effff6",STRIPES],["#a23b2b","#fff3ee",GRID],["#2d5d9b","#eef5ff",WAVES]];
 function styleOf(c){if(STYLE[c])return STYLE[c];let h=0;for(const ch of String(c||""))h=(h*31+ch.charCodeAt(0))|0;return EXTRA[Math.abs(h)%EXTRA.length];}
@@ -463,7 +474,7 @@ function fmtNum(x){
   let best=opts[0];for(const o of opts)if(Math.abs(o[0]-rest)<Math.abs(best[0]-rest))best=o;
   const w=whole+(best[0]===1?1:0);
   if(!best[1])return String(w||(x>0?"¼":"0"));
-  return w?`${w}${best[1]}`:best[1];
+  return w?`\u2066${w}${best[1]}\u2069`:best[1]; // isolate so Hebrew text does not flip it to "½3"
 }
 function scaleLine(line,k){
   if(k===1)return [line,false];
@@ -479,8 +490,18 @@ function scaleLine(line,k){
   return [out,changed];
 }
 /* The recipe's base amount and what it counts: "כ-6 מנות" → 6 סועדים, "כ-40 ריבועים" → 40 ריבועים. */
-function baseServings(text){
+const isPickle=r=>/כבוש|כבישה|חמוצ|pickl/i.test(r.category||"");
+function baseServings(text,pickle){
   const t=String(text||"");
+  if(pickle){
+    // Pickles are made by weight or by count: "2 ק"ג מלפפונים", "500 גרם", "10 לימונים".
+    let m=t.match(/(\d+(?:[.,]\d+)?|[½¼¾])\s*(?:ק"ג|ק״ג|קילו|קג|kg)/i);
+    if(m)return {n:readNum(m[1]),unit:'ק"ג',kg:true};
+    m=t.match(/(\d+)\s*(?:גרם|ג'|gr?)\b/);
+    if(m)return {n:+m[1]/1000,unit:'ק"ג',kg:true};
+    m=t.match(/(\d+)\s*([\p{L}"׳']+)/u);
+    if(m&&!/^(צנצנות|צנצנת|ליטר|כוסות?)$/.test(m[2]))return {n:+m[1],unit:m[2],count:true};
+  }
   let m=t.match(/(\d+)\s*(?:מנות|סועדים|איש|אנשים|servings?)/);
   if(m)return {n:+m[1],unit:"סועדים"};
   m=t.match(/(\d+)\s*([\p{L}"׳']+)?/u);
@@ -574,7 +595,8 @@ function openRecipe(id){
   const r=recipes.find(x=>x.id===id);if(!r)return;
   const[bg]=styleOf(r.category);const ts=terms();
   // Servings: base amount from the "כמות" field; without a number, a plain multiplier (×½ … ×4).
-  const base=baseServings(r.servings), MULTS=[0.5,1,1.5,2,3,4];
+  const pickle=isPickle(r);
+  const base=baseServings(r.servings,pickle), MULTS=[0.5,1,1.5,2,3,4];
   let k=1, amount=base.n;
   const lines=()=>(r.ingredients||[]).map(t=>/[:：]$/.test(t)?t:scaleLine(t,k)[0]);
   const ingHtml=()=>(r.ingredients||[]).map((t,i)=>{
@@ -585,7 +607,7 @@ function openRecipe(id){
   const scaler=(r.ingredients||[]).length?`<div class="scaler">
       <span class="lbl-like" id="sLbl">${base.n?`כמה ${esc(base.unit)}?`:"כמות:"}</span>
       <div class="stepper"><button type="button" id="sMinus" aria-label="פחות">−</button>
-        ${base.n?`<input id="sNum" type="number" inputmode="numeric" min="1" max="999" value="${base.n}" aria-label="מספר ${esc(base.unit)}">`:`<output id="sNum">×1</output>`}
+        ${base.n?`<input id="sNum" type="number" inputmode="${base.kg?"decimal":"numeric"}" step="${base.kg?"0.25":"1"}" min="${base.kg?"0.25":"1"}" max="999" value="${base.n}" aria-label="מספר ${esc(base.unit)}">`:`<output id="sNum">×1</output>`}
         <button type="button" id="sPlus" aria-label="יותר">+</button></div>
       <button type="button" class="linkbtn" id="sReset" hidden>חזרה ל${base.n?`-${base.n}`:"כמות המקורית"}</button>
       <span class="hint" id="sHint" hidden>זמני בישול ואפייה ארוכים הותאמו לכמות. בדקו מוכנות לפני שמוציאים.</span></div>`:"";
@@ -608,6 +630,18 @@ function openRecipe(id){
       <div class="facts">${fact("זמן",r.time)}${fact("כמות",r.servings)}${fact("מצרכים",(r.ingredients||[]).filter(t=>!/[:：]$/.test(t)).length||"")}</div>
       <div class="recipe-body">
         <section><div class="h4">מצרכים</div>${scaler}<div class="index"><ul class="ing">${ing||"<li>—</li>"}</ul></div>
+          ${pickle?`<div class="salt" id="salt">
+            <div class="h5">מחשבון מלח לכבישה</div>
+            <div class="salt-row"><label for="pAmt">כמות ירקות</label>
+              <div class="salt-inline"><input id="pAmt" type="number" inputmode="decimal" min="0" step="any">
+                <select id="pUnit" aria-label="יחידת מידה"><option value="kg">ק"ג</option><option value="pcs">יחידות</option></select></div></div>
+            <div class="salt-row" id="pPcsRow" hidden><label for="pPcs">משקל יחידה (גרם)</label><input id="pPcs" type="number" inputmode="numeric" min="1" step="1"></div>
+            <div class="seg salt-seg" role="group" aria-label="שיטת כבישה"><button type="button" data-m="brine">תמלחת (מי מלח)</button><button type="button" data-m="dry">המלחה יבשה</button></div>
+            <div class="salt-row"><label for="pPct">אחוז מלח</label><select id="pPct"></select></div>
+            <div class="salt-row" id="pWaterRow"><label for="pWater">מים (ליטר)</label><input id="pWater" type="number" inputmode="decimal" min="0" step="0.1"></div>
+            <div class="salt-out" id="pOut" aria-live="polite"></div>
+            <p class="hint" id="pNote"></p>
+          </div>`:""}
           ${missingAmounts(r)?`<div class="fill-row"><button class="btn ghost" id="fillAmt" type="button">השלמת כמויות</button><span class="hint live" id="fillMsg" aria-live="polite">יש מצרכים בלי כמות${r.servings?"":" ואין מספר מנות"}.</span></div>`:""}
           ${(r.ingredients||[]).length?`<div class="keep-row"><button class="btn ghost keep" id="keep" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#f6b400" d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path fill="#fff" d="M12 7a4 4 0 0 0-2.2 7.3V16h4.4v-1.7A4 4 0 0 0 12 7zm-2 10h4v1.2a.8.8 0 0 1-.8.8h-2.4a.8.8 0 0 1-.8-.8z"/></svg>יצירת רשימה ב-Keep</button><span class="hint live" id="keepMsg" aria-live="polite"></span></div>`:""}
         </section>
@@ -625,17 +659,54 @@ function openRecipe(id){
     const apply=()=>{
       const checked=[...document.querySelectorAll("ul.ing input:checked")].map(x=>x.id);
       $("ul.ing").innerHTML=ingHtml();checked.forEach(id=>{const c=document.getElementById(id);if(c)c.checked=true;});
-      if(base.n)$("#sNum").value=amount;else $("#sNum").textContent=`×${fmtNum(k)}`;
+      if(base.n)$("#sNum").value=base.kg?+amount.toFixed(2):amount;else $("#sNum").textContent=`×${fmtNum(k)}`;
       $("#sReset").hidden=$("#sHint").hidden=k===1;
       const done=[...document.querySelectorAll("#steps li")].map(li=>li.classList.contains("done"));
       $("#steps").innerHTML=stepsHtml();document.querySelectorAll("#steps li").forEach((li,i)=>li.classList.toggle("done",!!done[i]));
     };
-    const step=base.n>12?Math.max(1,Math.round(base.n/4)):1;
-    const set=v=>{if(base.n){amount=Math.max(1,Math.min(999,Math.round(v)||base.n));k=amount/base.n;}else{k=v;}apply();};
+    const step=base.kg?0.5:base.n>12?Math.max(1,Math.round(base.n/4)):1;
+    const set=v=>{if(base.n){amount=base.kg?Math.max(0.25,Math.min(999,Math.round((v||base.n)*4)/4)):Math.max(1,Math.min(999,Math.round(v)||base.n));k=amount/base.n;}else{k=v;}apply();if(pickle)syncSalt();};
     $("#sPlus").onclick=()=>base.n?set(amount+step):set(MULTS[Math.min(MULTS.length-1,MULTS.indexOf(k)+1)]);
     $("#sMinus").onclick=()=>base.n?set(amount-step):set(MULTS[Math.max(0,MULTS.indexOf(k)-1)]);
     $("#sReset").onclick=()=>set(base.n||1);
     if(base.n)$("#sNum").onchange=e=>set(+e.target.value);
+  }
+  /* Salt for pickling. Brine: salt is a percentage of the water's weight (1 L = 1 kg).
+     Dry salting: a percentage of the vegetables' weight. 1 tablespoon ≈ 18 g fine salt, ≈ 15 g coarse salt. */
+  const UNIT_G={"מלפפון":100,"לימון":120,"גזר":100,"פלפל":150,"חציל":250,"כרובית":800,"כרוב":1200,"לפת":200,"צנון":300,"סלק":200,"זית":5,"עגבני":120,"בצל":150,"שום":50,"קולורבי":250};
+  const guessG=()=>{const t=norm([r.title,r.servings,...(r.ingredients||[])].join(" "));for(const w in UNIT_G)if(t.includes(norm(w)))return UNIT_G[w];return 100;};
+  const PCTS={brine:[2,3,3.5,4,5,6],dry:[1.5,2,2.5,3]};
+  let saltMode="brine",waterTouched=false;
+  try{saltMode=localStorage.getItem("recipes.saltMode")||"brine";}catch{}
+  function vegKg(){const v=+$("#pAmt").value||0;return $("#pUnit").value==="kg"?v:v*(+$("#pPcs").value||0)/1000;}
+  function drawSalt(){
+    if(!$("#salt"))return;
+    document.querySelectorAll(".salt-seg button").forEach(b=>{b.classList.toggle("on",b.dataset.m===saltMode);b.setAttribute("aria-pressed",b.dataset.m===saltMode);});
+    $("#pWaterRow").hidden=saltMode!=="brine";$("#pPcsRow").hidden=$("#pUnit").value!=="pcs";
+    const kg=vegKg();
+    if(saltMode==="brine"&&!waterTouched)$("#pWater").value=kg?Math.round(kg*0.6*10)/10:"";
+    const pct=+$("#pPct").value, base=saltMode==="brine"?(+$("#pWater").value||0):kg;
+    const g=Math.round(base*1000*pct/100);
+    const tb=x=>fmtNum(Math.round(g/x*2)/2);
+    $("#pOut").innerHTML=g?`<b>${g} גרם מלח</b><span>≈ ${tb(18)} כפות מלח דק · ${tb(15)} כפות מלח גס</span>`:`<span>הזינו כמות ירקות כדי לחשב.</span>`;
+    $("#pNote").textContent=saltMode==="brine"
+      ?`המלח מחושב לפי משקל המים (${pct}% = ${pct*10} גרם לליטר). כמות המים היא הערכה לצנצנת מלאה, כ-0.6 ליטר לכל ק"ג ירקות; אפשר לשנות.`
+      :`המלח מחושב לפי משקל הירקות (${pct}% = ${pct*10} גרם לכל ק"ג), כמו בכרוב כבוש.`;
+  }
+  function fillPct(){const keep=+$("#pPct").value;const opts=PCTS[saltMode];const def=saltMode==="brine"?4:2;
+    $("#pPct").innerHTML=opts.map(p=>`<option value="${p}">${p}%</option>`).join("");$("#pPct").value=opts.includes(keep)?keep:def;}
+  function syncSalt(){ // follow the amount chosen above
+    if(!$("#salt")||!base.n)return;
+    if(base.kg){$("#pUnit").value="kg";$("#pAmt").value=+amount.toFixed(2);}else{$("#pUnit").value="pcs";$("#pAmt").value=amount;}
+    drawSalt();
+  }
+  if($("#salt")){
+    $("#pPcs").value=guessG();fillPct();
+    if(base.n)syncSalt();else{$("#pAmt").value=1;drawSalt();}
+    ["pAmt","pPcs","pPct"].forEach(id=>$("#"+id).oninput=drawSalt);
+    $("#pUnit").onchange=drawSalt;
+    $("#pWater").oninput=()=>{waterTouched=true;drawSalt();};
+    document.querySelector(".salt-seg").onclick=e=>{const b=e.target.closest("[data-m]");if(!b)return;saltMode=b.dataset.m;try{localStorage.setItem("recipes.saltMode",saltMode);}catch{}fillPct();drawSalt();};
   }
   $("#fav").onclick=()=>toggleFav(r);
   if($("#fillAmt"))$("#fillAmt").onclick=async()=>{
@@ -737,7 +808,7 @@ function openForm(r){
       <span id="phMsg" class="hint live" aria-live="polite"></span></div>
     <div class="row"><div class="f"><label for="fCat">קטגוריה</label><select id="fCat">${catOpts}</select><input id="fCatNew" placeholder="שם הקטגוריה" hidden></div>
       <div class="f"><label for="fTime">זמן</label><input id="fTime" value="${esc(r.time)}" placeholder="45 דקות"></div>
-      <div class="f"><label for="fServ">כמות</label><input id="fServ" value="${esc(r.servings)}" placeholder="4 מנות"></div></div>
+      <div class="f"><label for="fServ">כמות</label><input id="fServ" value="${esc(r.servings)}" placeholder="${isPickle(r)?'2 ק"ג מלפפונים':"4 מנות"}"></div></div>
     <div class="row"><div class="f"><label for="fAuthor">מאת</label><input id="fAuthor" dir="auto" value="${esc(r.author)}"></div>
       <div class="f"><label for="fSrc">לינק למקור</label><input id="fSrc" dir="ltr" value="${esc(r.source)}"></div></div>
     <div class="f"><label for="fIntro">תיאור קצר</label><textarea id="fIntro" style="min-height:60px">${esc(r.intro)}</textarea></div>
@@ -789,7 +860,7 @@ function openForm(r){
     }catch{picked=null;$("#phMsg").textContent="לא הצלחתי לקרוא את התמונה. נסו תמונה אחרת (JPG או PNG).";}
   };
   $("#fPhotoDel").onclick=()=>{photo="";picked=null;$("#fPhoto").value="";$("#fPhotoPrev").style.backgroundImage="";$("#fPhotoPrev").innerHTML=CAM;$("#fPhotoDel").hidden=true;$("#phMsg").textContent="";};
-  $("#fCat").onchange=e=>{$("#fCatNew").hidden=e.target.value!=="__new";};
+  $("#fCat").onchange=e=>{$("#fCatNew").hidden=e.target.value!=="__new";$("#fServ").placeholder=isPickle({category:e.target.value})?'2 ק"ג מלפפונים, או 10 לימונים':"4 מנות";};
   if(r.category&&!allCats().includes(r.category)){$("#fCat").value="__new";$("#fCatNew").hidden=false;$("#fCatNew").value=r.category;}
   $("#mf").onsubmit=async e=>{
     e.preventDefault();
