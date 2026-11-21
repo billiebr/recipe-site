@@ -270,6 +270,12 @@ ul.ing li.scaled span{color:var(--eggplant);font-weight:700}
 .keep svg{width:20px;height:20px;flex:none}
 .linkrow{display:flex;gap:8px;flex-wrap:wrap}
 .linkrow input{flex:1 1 220px;min-width:0}
+.batch{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.batch li{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--card);border:2px solid var(--line);border-radius:12px;padding:12px 14px}
+.batch li.done{border-color:var(--olive,#6b7f1a);opacity:.8}
+.batch .bt{flex:1 1 200px;min-width:0}.batch .bt b{display:block;font-size:1.1rem}.batch .bt span{color:var(--muted);font-size:.9rem}
+.batch .ok{color:var(--olive,#6b7f1a);font-weight:800}
+.batch-nav{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-top:10px;font-weight:800}
 .or{display:flex;align-items:center;gap:12px;color:var(--muted);font-weight:800;margin:18px 0 14px}
 .or::before,.or::after{content:"";flex:1;height:2px;background:var(--line)}
 .logout{background:none;border:0;color:var(--muted);text-decoration:underline;cursor:pointer;font-size:.85rem;padding:0;margin-top:10px}
@@ -856,7 +862,7 @@ function openForm(r){
       <div class="linkrow"><input id="fUrl" type="url" dir="ltr" inputmode="url" placeholder="https://… או לינק לרילז" autocomplete="off"><button class="btn" id="readUrl" type="button">קרא את המתכון</button></div>
       <span id="uMsg" class="hint live" aria-live="polite"></span></div></div>
     <div class="callout link-box scan-box"><div class="f"><span class="lbl-like">סריקה מתמונה</span>
-      <span class="hint">מצלמים דף מספר מתכונים, כרטיס בכתב יד או צילום מסך, והספר קורא ממנו את המתכון. מתכון על כמה דפים? מעלים עד 4 תמונות לפי הסדר.</span>
+      <span class="hint">מצלמים דף מספר מתכונים, כרטיס בכתב יד או צילום מסך, והספר קורא ממנו את המתכון. מתכון על כמה דפים, או פוסט עם כמה מתכונים? מעלים עד 4 תמונות לפי הסדר.</span>
       <div class="row-btns"><label class="btn" for="scanCam">${CAM}צילום</label><input type="file" id="scanCam" accept="image/*" capture="environment" hidden>
         <label class="btn ghost" for="scanPick">העלאת תמונות</label><input type="file" id="scanPick" accept="image/*" multiple hidden></div>
       <span id="scanMsg" class="hint live" aria-live="polite"></span></div></div>
@@ -869,7 +875,9 @@ function openForm(r){
   const filledNote=r._filled?`<div class="callout video-note">הוספתי כמויות משוערות למצרכים שהיו בלי כמות, מסומנות ב״כ-״. בדקו, תקנו אם צריך ושמרו.</div>`:"";
   const videoNote=fromLink&&isVideo(r.source)&&!(r.ingredients||[]).length&&!(r.steps||[]).length
     ?`<div class="callout video-note">לא מצאתי בכיתוב חלוקה ברורה למצרכים ולשלבים, אז כל הכיתוב נמצא בשדה ״הערות״. העבירו את השורות למקום הנכון ושמרו.</div>`:"";
-  shell(`<div class="form-head"><h2>${!isNew?"עריכת מתכון":fromLink?"בדקו ושמרו":"מתכון חדש"}</h2>${videoNote}${filledNote}</div>
+  const inBatch=batch&&r._b!=null;
+  const batchNote=inBatch?`<div class="batch-nav"><span>מתכון ${r._b+1} מתוך ${batch.length}</span><button class="linkbtn" type="button" id="toBatch">→ חזרה לרשימה</button></div>`:"";
+  shell(`<div class="form-head"><h2>${!isNew?"עריכת מתכון":fromLink?"בדקו ושמרו":"מתכון חדש"}</h2>${batchNote}${videoNote}${filledNote}</div>
     <div class="inner">${linkUI}<form class="form" id="mf">
     <div class="f"><label for="fTitle">שם המתכון</label><input id="fTitle" required value="${esc(r.title)}"></div>
     <fieldset class="toggle"><legend>טבעוני?</legend><div class="opts">
@@ -891,12 +899,13 @@ function openForm(r){
     <div class="f"><label for="fSteps">שלבי ההכנה</label><span class="hint">שורה לכל שלב</span><textarea id="fSteps" style="min-height:190px">${esc((r.steps||[]).join("\n"))}</textarea></div>
     <div class="f"><label for="fNotes">הערות</label><textarea id="fNotes" style="min-height:60px">${esc(r.notes)}</textarea></div>
     <div class="row-btns"><button class="btn big" type="submit" id="save">שמירה בספר</button><span id="sMsg" class="err"></span></div></form></div>`);
+  if(inBatch)$("#toBatch").onclick=openBatch;
   if(linkUI){
     const read=async()=>{
       const url=$("#fUrl").value.trim();
       if(!url){$("#uMsg").textContent="הדביקו קודם לינק למתכון.";return;}
       $("#readUrl").disabled=true;$("#uMsg").textContent="קורא את המתכון…";
-      try{const {recipe}=await api("POST",{url,categories:allCats()},null,"/api/import");openForm(recipe);}
+      try{got(await api("POST",{url,categories:allCats()},null,"/api/import"));}
       catch(err){$("#readUrl").disabled=false;$("#uMsg").textContent=err.message;}
     };
     $("#readUrl").onclick=read;
@@ -907,7 +916,7 @@ function openForm(r){
       try{
         const images=[];for(const f of files)images.push(await shrink(f,1600,.85));
         $("#scanMsg").textContent="קורא את המתכון מהתמונה… זה יכול לקחת כמה שניות.";
-        const {recipe}=await api("POST",{images,categories:allCats()},null,"/api/import");openForm(recipe);
+        got(await api("POST",{images,categories:allCats()},null,"/api/import"));
       }catch(err){$("#scanMsg").textContent=err.message||"לא הצלחתי לקרוא את התמונה. נסו תמונה אחרת.";}
       finally{btns.forEach(b=>b.classList.remove("busy"));}
     };
@@ -917,7 +926,7 @@ function openForm(r){
       if(text.length<20){$("#pasteMsg").textContent="הדביקו קודם את טקסט המתכון.";return;}
       $("#readPaste").disabled=true;$("#pasteMsg").textContent="מסדר את המתכון…";
       const src=(text.match(/https?:\/\/[^\s"'<>]+/)||[])[0]||"";
-      try{const {recipe}=await api("POST",{text,categories:allCats()},null,"/api/import");openForm({...recipe,source:recipe.source||src});}
+      try{got(await api("POST",{text,categories:allCats()},null,"/api/import"),{source:src});}
       catch(err){$("#readPaste").disabled=false;$("#pasteMsg").textContent=err.message;}
     };
     $("#fUrl").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();read();}};
@@ -947,8 +956,40 @@ function openForm(r){
       if(picked){$("#sMsg").textContent="מעלה את התמונה…";photo=(await api("POST",picked,null,"/api/photo")).photo;picked=null;$("#sMsg").textContent="";}
       data.photo=photo;
       const {recipe}=await api("POST",data);
-      recipes=recipes.filter(x=>x.id!==recipe.id).concat(index(recipe));cat=c;render();openRecipe(recipe.id);}
+      recipes=recipes.filter(x=>x.id!==recipe.id).concat(index(recipe));cat=c;render();
+      if(inBatch&&batch[r._b]){batch[r._b].saved=recipe.id;batch.every(b=>b.saved)?finishBatch():openBatch();}else openRecipe(recipe.id);}
     catch(err){$("#save").disabled=false;$("#sMsg").textContent=err.message;}
+  };
+}
+
+/* One source (a carousel post, a cookbook spread, a long message) can hold several recipes.
+   A single recipe opens straight in the form; several open a list to review and save one by one, or all at once. */
+let batch=null;
+function got(res,extra={}){
+  const list=(res.recipes&&res.recipes.length?res.recipes:[res.recipe]).filter(Boolean).map(d=>({...d,source:d.source||extra.source||""}));
+  if(list.length<2){batch=null;openForm(list[0]);return;}
+  batch=list.map(draft=>({draft,saved:null}));openBatch();
+}
+function finishBatch(){const ids=batch.map(b=>b.saved).filter(Boolean);batch=null;render();ids.length===1?openRecipe(ids[0]):closeModal();}
+function openBatch(){
+  if(!batch)return;
+  const left=batch.filter(b=>!b.saved).length;
+  shell(`<div class="form-head"><h2>מצאתי ${batch.length} מתכונים</h2></div>
+    <div class="inner"><p class="hint" style="margin-top:0">בודקים כל מתכון ושומרים, או שומרים את כולם בבת אחת ומתקנים אחר כך. מתכון שלא רוצים? פשוט לא שומרים אותו.</p>
+    <ul class="batch">${batch.map((b,i)=>`<li class="${b.saved?"done":""}"><div class="bt"><b>${esc(b.draft.title)}</b><span>${esc(b.draft.category||"")}${(b.draft.ingredients||[]).length?` · ${b.draft.ingredients.length} מצרכים`:""}</span></div>
+      ${b.saved?`<span class="ok">✓ נשמר</span><button class="btn ghost" type="button" data-open="${i}">פתיחה</button>`:`<button class="btn ghost" type="button" data-edit="${i}">בדיקה ושמירה</button>`}</li>`).join("")}</ul>
+    <div class="row-btns" style="margin-top:18px">${left?`<button class="btn big" type="button" id="saveAll">${left===batch.length?`שמירת כל ${left} המתכונים`:left===1?"שמירת המתכון הנותר":`שמירת ${left} המתכונים הנותרים`}</button>`:""}
+      <button class="btn ghost" type="button" id="batchDone">${left?"סגירה":"סיום"}</button><span id="bMsg" class="hint live" aria-live="polite"></span></div></div>`);
+  document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>{const i=+b.dataset.edit;openForm({...batch[i].draft,_b:i});});
+  document.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{const id=batch[+b.dataset.open].saved;batch=null;openRecipe(id);});
+  $("#batchDone").onclick=()=>{batch=null;closeModal();};
+  if(left)$("#saveAll").onclick=async()=>{
+    $("#saveAll").disabled=true;
+    try{for(const b of batch){if(b.saved)continue;$("#bMsg").textContent=`שומר את ״${b.draft.title}״…`;
+      const {recipe}=await api("POST",{...b.draft,vegan:b.draft.vegan===true});b.saved=recipe.id;
+      recipes=recipes.filter(x=>x.id!==recipe.id).concat(index(recipe));}
+      finishBatch();}
+    catch(err){render();openBatch();$("#bMsg").textContent=err.message;}
   };
 }
 

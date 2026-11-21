@@ -274,7 +274,10 @@ function geminiSetup() {
     : { key, base: GOOGLE_BASE, model: env.GEMINI_MODEL || "gemini-flash-lite-latest", source: "GEMINI_API_KEY" };
 }
 
-async function withGemini(setup, source, categories) {
+// One source can hold several recipes (a carousel post, a cookbook spread, a long message).
+const MULTI_SCHEMA = { type: "OBJECT", properties: { recipes: { type: "ARRAY", items: DRAFT_SCHEMA } }, required: ["recipes"] };
+
+async function withGemini(setup, source, categories, { multi = false } = {}) {
   const { key: apiKey, base, model } = setup;
   let res;
   try {
@@ -289,10 +292,11 @@ async function withGemini(setup, source, categories) {
           "Keep the ingredients, quantities and steps faithful to the source and do not invent ingredients or steps. " +
           "When an ingredient has no quantity in the source, add a typical amount for this recipe and start it with \"כ-\" so the family sees it is an estimate (for example \"כ-3 כפות שמן\", \"כ-1 כפית מלח\"). " +
           "When the source does not say how many it serves, estimate it the same way (for example \"כ-6 מנות\"). Leave time and author empty when the source does not say. " +
-          `Choose the category from this list: ${JSON.stringify(categories)}.` }] },
+          `Choose the category from this list: ${JSON.stringify(categories)}.` +
+          (multi ? " The source may hold several separate recipes: return each one as its own entry in \"recipes\", in the order they appear. Do not merge different dishes, and do not split one recipe into parts." : "") }] },
         contents: [{ role: "user", parts: typeof source === "string" ? [{ text: source }] : source }],
         generationConfig: {
-          responseMimeType: "application/json", responseSchema: DRAFT_SCHEMA, maxOutputTokens: 8000,
+          responseMimeType: "application/json", responseSchema: multi ? MULTI_SCHEMA : DRAFT_SCHEMA, maxOutputTokens: multi ? 24000 : 8000,
           ...(/^gemini-3/.test(model) ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
         },
       }),
@@ -316,14 +320,21 @@ async function withGemini(setup, source, categories) {
   try { draft = JSON.parse(text); } catch {
     throw new ImportError("read_failed", `Gemini returned no usable answer (${cand?.finishReason || out.promptFeedback?.blockReason || "empty"})`);
   }
-  if (!draft.is_recipe) throw new ImportError("no_recipe");
   const str = v => plainHebrew(v).trim();
   const list = v => (Array.isArray(v) ? v : []).map(str).filter(Boolean);
-  return {
-    title: str(draft.title), category: str(draft.category) || "עיקריות", author: str(draft.author), intro: str(draft.intro),
-    servings: str(draft.servings), time: str(draft.time), ingredients: list(draft.ingredients), steps: list(draft.steps), notes: str(draft.notes),
-    vegan: draft.vegan === true,
-  };
+  const tidy = d => ({
+    title: str(d.title), category: str(d.category) || "עיקריות", author: str(d.author), intro: str(d.intro),
+    servings: str(d.servings), time: str(d.time), ingredients: list(d.ingredients), steps: list(d.steps), notes: str(d.notes),
+    vegan: d.vegan === true,
+  });
+  if (multi) {
+    const found = (Array.isArray(draft.recipes) ? draft.recipes : []).filter(d => d && d.is_recipe).map(tidy)
+      .filter(d => d.title && (d.ingredients.length || d.steps.length));
+    if (!found.length) throw new ImportError("no_recipe");
+    return found;
+  }
+  if (!draft.is_recipe) throw new ImportError("no_recipe");
+  return tidy(draft);
 }
 
 // Scanning: photos of a cookbook page, a handwritten card or a screenshot (up to 4, in order).
@@ -337,13 +348,14 @@ async function fromImages(images, categories) {
   if (!parts.length) throw new ImportError("bad_image");
   const setup = geminiSetup();
   if (!setup) throw new ImportError("needs_ai_scan");
-  const draft = await withGemini(setup, [
-    { text: `${parts.length > 1 ? `These ${parts.length} images are pages of one recipe, in order` : "This image is a recipe"}: a cookbook page, a handwritten card, a screenshot or a photo of a screen. ` +
-      "Read all the text, including handwriting, and fill the fields from what is written. If a word is unclear, write your best reading." },
-    ...parts,
-  ], categories);
-  if (!draft.title || (!draft.ingredients.length && !draft.steps.length)) throw new ImportError("no_recipe_image");
-  return draft;
+  try {
+    return await withGemini(setup, [
+      { text: `${parts.length > 1 ? `These ${parts.length} images come from one post, card or book, in order` : "This image is from a post, a card or a book"}: a cookbook page, a handwritten card, a screenshot or a photo of a screen. ` +
+        "They may hold one recipe (perhaps spread over several images) or several different recipes. " +
+        "Read all the text, including handwriting, and fill the fields from what is written. If a word is unclear, write your best reading." },
+      ...parts,
+    ], categories, { multi: true });
+  } catch (e) { throw e instanceof ImportError && e.message === "no_recipe" ? new ImportError("no_recipe_image") : e; }
 }
 
 // Pasted text: a caption copied from a reel, a WhatsApp message, a page...
@@ -352,12 +364,12 @@ async function fromText(text, categories) {
   if (text.length < 20) throw new ImportError("short_text");
   const setup = geminiSetup();
   if (setup) {
-    try { return await withGemini(setup, `Recipe text the family copied and pasted (often a video caption or a message):\n${text}`, categories); }
+    try { return await withGemini(setup, `Recipe text the family copied and pasted (often a video caption or a message):\n${text}`, categories, { multi: true }); }
     catch (e) { if (e instanceof ImportError && e.message === "no_recipe") throw e; /* else split it by its own headings below */ }
   }
   const draft = captionDraft({ caption: text }, categories);
   if (!draft.title) throw new ImportError("no_recipe");
-  return draft;
+  return [draft];
 }
 
 // "השלמת כמויות": estimated amounts for ingredients that have none, and servings when missing.
@@ -386,16 +398,16 @@ async function fromVideo(url, platform, categories) {
     const source = `This is the caption of a ${platform} video${v.author ? ` by ${v.author}` : ""}. Most of the time it holds a full recipe.\n` +
       (v.title ? `Video title: ${v.title}\n` : "") + `Caption:\n${String(v.caption).slice(0, MAX_TEXT_CHARS)}`;
     try {
-      const draft = await withGemini(setup, source, categories);
-      if (!draft.author && v.author) draft.author = v.author;
-      return draft;
+      const found = await withGemini(setup, source, categories, { multi: true });
+      for (const d of found) if (!d.author && v.author) d.author = v.author;
+      return found;
     } catch {
       // Gemini unavailable, over quota or found no recipe: split the caption by its own headings.
     }
   }
   const draft = captionDraft(v, categories);
   if (!draft.title) throw new ImportError("no_caption", `${platform}: the caption is empty`);
-  return draft;
+  return [draft];
 }
 
 export default async (req) => {
@@ -409,23 +421,26 @@ export default async (req) => {
   const categories = [...new Set([...CATS, ...extra])];
 
   try {
-    if (Array.isArray(body.images)) return json({ recipe: await fromImages(body.images, categories) });
-    if (typeof body.text === "string") return json({ recipe: await fromText(body.text, categories) });
+    // Every reader returns a list: usually one recipe, several when the source holds several.
+    const reply = (list, extra = {}) => { const recipes = list.map(d => ({ ...d, ...extra })); return json({ recipe: recipes[0], recipes }); };
+    if (Array.isArray(body.images)) return reply(await fromImages(body.images, categories));
+    if (typeof body.text === "string") return reply(await fromText(body.text, categories));
     if (body.fillAmounts && typeof body.fillAmounts === "object") return json({ recipe: await fillAmounts(body.fillAmounts, categories) });
     const url = checkUrl(body.url);
     const platform = platformOf(url);
-    if (platform) return json({ recipe: { ...(await fromVideo(url, platform, categories)), source: url.href } });
+    if (platform) return reply(await fromVideo(url, platform, categories), { source: url.href });
     const html = await fetchPage(url);
     const data = findRecipeData(html);
     const setup = geminiSetup();
-    let draft;
+    let draft, many = null;
     if (setup) {
       const { title, text } = pageText(html);
       const source = data
         ? `Recipe data embedded in the page (schema.org):\n${JSON.stringify(data).slice(0, MAX_TEXT_CHARS)}`
         : `Page title: ${title}\n\nPage text:\n${text}`;
       try {
-        draft = await withGemini(setup, source, categories);
+        many = await withGemini(setup, source, categories, { multi: true });
+        draft = many[0];
       } catch (e) {
         // If Gemini is slow, out of free quota or unavailable, use the page's own recipe data.
         if (e instanceof ImportError && e.message === "no_recipe") throw e;
@@ -440,7 +455,7 @@ export default async (req) => {
       draft = mapDirect(data, categories);
     }
     if (!draft.title || (!draft.ingredients.length && !draft.steps.length)) throw new ImportError("no_recipe");
-    return json({ recipe: { ...draft, source: url.href } });
+    return reply(many || [draft], { source: url.href });
   } catch (e) {
     if (e instanceof ImportError) return json({ error: e.message, detail: e.detail }, 422);
     console.error(e);
