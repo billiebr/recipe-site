@@ -277,7 +277,7 @@ function geminiSetup() {
 // One source can hold several recipes (a carousel post, a cookbook spread, a long message).
 const MULTI_SCHEMA = { type: "OBJECT", properties: { recipes: { type: "ARRAY", items: DRAFT_SCHEMA } }, required: ["recipes"] };
 
-async function withGemini(setup, source, categories, { multi = false } = {}) {
+async function withGemini(setup, source, categories, { multi = false, known = false } = {}) {
   const { key: apiKey, base, model } = setup;
   let res;
   try {
@@ -334,7 +334,8 @@ async function withGemini(setup, source, categories, { multi = false } = {}) {
     if (!found.length) throw new ImportError("no_recipe");
     return found;
   }
-  if (!draft.is_recipe) throw new ImportError("no_recipe");
+  // "known": the family already has this recipe (translating, filling amounts), so never answer "no recipe".
+  if (!draft.is_recipe && !known) throw new ImportError("no_recipe");
   return tidy(draft);
 }
 
@@ -387,7 +388,7 @@ async function fillAmounts(r, categories) {
     "Here is a recipe from the family book. Return it with the same title, steps and notes, and the same ingredients in the same order " +
     "(keep group headers that end with a colon). Change only this: every ingredient that has no quantity gets a typical amount for this recipe, " +
     "starting with \"כ-\"; a line that lists several seasonings may be split into one line per seasoning. Keep every quantity that is already there exactly as written. " +
-    "If servings is empty, estimate it starting with \"כ-\".\n" + JSON.stringify(recipe), categories);
+    "If servings is empty, estimate it starting with \"כ-\".\n" + JSON.stringify(recipe), categories, { known: true });
   return { ingredients: draft.ingredients, servings: recipe.servings || draft.servings };
 }
 
@@ -403,8 +404,14 @@ async function translate(r, categories) {
     ingredients: (Array.isArray(r.ingredients) ? r.ingredients : []).map(String).slice(0, 200),
     steps: (Array.isArray(r.steps) ? r.steps : []).map(String).slice(0, 200),
   };
-  const d = await withGemini(setup, "Translate this recipe from the family book into Hebrew. Keep every ingredient, quantity and step, in the same order; " +
-    "keep group headers that end with a colon. Keep the author's name as written.\n" + JSON.stringify(recipe), categories);
+  const ask = strict => (strict
+      ? "The previous answer was still in English. Every field you return MUST be written in Hebrew letters: translate the title, every ingredient, every step and the notes. " +
+        "Only brand names may stay in English. תרגם את כל המתכון לעברית.\n"
+      : "Translate this recipe from the family book into Hebrew. ") +
+    "Keep every ingredient, quantity and step, in the same order; keep group headers that end with a colon. Keep the author's name as written.\n" + JSON.stringify(recipe);
+  let d = await withGemini(setup, ask(false), categories, { known: true });
+  if (isForeign(d)) d = await withGemini(setup, ask(true), categories, { known: true });
+  if (isForeign(d)) throw new ImportError("still_foreign");
   return { ...d, author: recipe.author || d.author, category: d.category || recipe.category };
 }
 
