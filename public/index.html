@@ -858,7 +858,7 @@ function confirmBox(title,text,okLabel){
   });
 }
 function releaseWake(){if(typeof timers!=="undefined"&&timers.some(t=>!t.done))return; /* keep the screen on while a timer runs */try{wakeLock&&wakeLock.release();}catch{}wakeLock=null;}
-const isForeign=r=>{const t=[r.title,...(r.ingredients||[]),...(r.steps||[])].join(" ");return (t.match(/[A-Za-z]/g)||[]).length>2*(t.match(/[\u05D0-\u05EA]/g)||[]).length;};
+const isForeign=r=>{const t=[r.title,...(r.ingredients||[]),...(r.steps||[]),r.notes].join(" ");return (t.match(/[A-Za-z]/g)||[]).length>2*(t.match(/[\u05D0-\u05EA]/g)||[]).length;};
 const isVideo=u=>{try{return /(^|\.)(instagram\.com|tiktok\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch)$/.test(new URL(u).hostname);}catch{return false;}};
 function shortUrl(u){try{return new URL(u).hostname.replace(/^www\./,"");}catch{return u;}}
 

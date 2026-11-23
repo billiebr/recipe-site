@@ -370,7 +370,7 @@ async function fromText(text, categories) {
   }
   const draft = captionDraft({ caption: text }, categories);
   if (!draft.title) throw new ImportError("no_recipe");
-  return [draft];
+  return [await inHebrew(draft, categories)];
 }
 
 // "השלמת כמויות": estimated amounts for ingredients that have none, and servings when missing.
@@ -392,7 +392,7 @@ async function fillAmounts(r, categories) {
 }
 
 // A recipe in another language, translated to Hebrew. Used for a saved recipe and when a page's own data was used without Gemini.
-const isForeign = r => { const t = [r.title, ...(r.ingredients || []), ...(r.steps || [])].join(" ");
+const isForeign = r => { const t = [r.title, ...(r.ingredients || []), ...(r.steps || []), r.notes].join(" ");
   return (t.match(/[A-Za-z]/g) || []).length > 2 * (t.match(/[\u05D0-\u05EA]/g) || []).length; };
 async function translate(r, categories) {
   const setup = geminiSetup();
@@ -406,6 +406,14 @@ async function translate(r, categories) {
   const d = await withGemini(setup, "Translate this recipe from the family book into Hebrew. Keep every ingredient, quantity and step, in the same order; " +
     "keep group headers that end with a colon. Keep the author's name as written.\n" + JSON.stringify(recipe), categories);
   return { ...d, author: recipe.author || d.author, category: d.category || recipe.category };
+}
+
+// A draft made without Gemini's full reading (page data or a caption split by its headings): translate it on its own,
+// which is short and usually quick; if that fails too, mark it so the form says so.
+async function inHebrew(draft, categories) {
+  if (!isForeign(draft) || !geminiSetup()) return isForeign(draft) ? { ...draft, untranslated: true } : draft;
+  try { return { ...(await translate(draft, categories)), author: draft.author }; }
+  catch { return { ...draft, untranslated: true }; }
 }
 
 async function fromVideo(url, platform, categories) {
@@ -425,7 +433,7 @@ async function fromVideo(url, platform, categories) {
   }
   const draft = captionDraft(v, categories);
   if (!draft.title) throw new ImportError("no_caption", `${platform}: the caption is empty`);
-  return [draft];
+  return [await inHebrew(draft, categories)];
 }
 
 export default async (req) => {
@@ -469,10 +477,7 @@ export default async (req) => {
         }
         draft = mapDirect(data, categories);
         // The full page was too much for Gemini this time; the short recipe alone usually translates quickly.
-        if (isForeign(draft)) {
-          try { draft = await translate(draft, categories); }
-          catch { draft.untranslated = true; }
-        }
+        draft = await inHebrew(draft, categories);
       }
     } else {
       if (!data) throw new ImportError("needs_ai");
