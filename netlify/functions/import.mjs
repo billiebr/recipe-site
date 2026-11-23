@@ -242,15 +242,15 @@ const DRAFT_SCHEMA = {
   type: "OBJECT",
   properties: {
     is_recipe: { type: "BOOLEAN", description: "false when the page has no recipe in it" },
-    title: S("recipe name"),
+    title: S("recipe name, in Hebrew"),
     category: S("one of the given categories, or a short new Hebrew category if none fits"),
     author: S("who wrote the recipe, or empty"),
     intro: S("one short sentence, or empty"),
     servings: S("how many servings, e.g. ״4 מנות״, or empty"),
     time: S("total time in Hebrew words, e.g. ״45 דקות״, or empty"),
-    ingredients: { type: "ARRAY", items: S("one ingredient with its quantity; a group header like ״לרוטב:״ ends with a colon") },
-    steps: { type: "ARRAY", items: S("one preparation step") },
-    notes: S("tips from the page, or empty"),
+    ingredients: { type: "ARRAY", items: S("one ingredient with its quantity, in Hebrew; a group header like ״לרוטב:״ ends with a colon") },
+    steps: { type: "ARRAY", items: S("one preparation step, in Hebrew") },
+    notes: S("tips from the page in Hebrew, or empty"),
     vegan: { type: "BOOLEAN", description: "true only when the recipe has no animal products at all (no meat, fish, eggs, dairy or honey)" },
   },
   required: ["is_recipe", "title", "category", "author", "intro", "servings", "time", "ingredients", "steps", "notes", "vegan"],
@@ -448,14 +448,19 @@ export default async (req) => {
 
   try {
     // Every reader returns a list: usually one recipe, several when the source holds several.
-    const reply = (list, extra = {}) => { const recipes = list.map(d => ({ ...d, ...extra })); return json({ recipe: recipes[0], recipes }); };
-    if (Array.isArray(body.images)) return reply(await fromImages(body.images, categories));
-    if (typeof body.text === "string") return reply(await fromText(body.text, categories));
+    // Light models sometimes skip the translation: anything still not in Hebrew gets its own translation pass.
+    const reply = async (list, extra = {}) => {
+      const recipes = [];
+      for (const d of list) recipes.push({ ...(d.untranslated ? d : await inHebrew(d, categories)), ...extra });
+      return json({ recipe: recipes[0], recipes });
+    };
+    if (Array.isArray(body.images)) return await reply(await fromImages(body.images, categories));
+    if (typeof body.text === "string") return await reply(await fromText(body.text, categories));
     if (body.fillAmounts && typeof body.fillAmounts === "object") return json({ recipe: await fillAmounts(body.fillAmounts, categories) });
     if (body.translate && typeof body.translate === "object") return json({ recipe: await translate(body.translate, categories) });
     const url = checkUrl(body.url);
     const platform = platformOf(url);
-    if (platform) return reply(await fromVideo(url, platform, categories), { source: url.href });
+    if (platform) return await reply(await fromVideo(url, platform, categories), { source: url.href });
     const html = await fetchPage(url);
     const data = findRecipeData(html);
     const setup = geminiSetup();
@@ -485,7 +490,7 @@ export default async (req) => {
       if (isForeign(draft)) draft.untranslated = true;
     }
     if (!draft.title || (!draft.ingredients.length && !draft.steps.length)) throw new ImportError("no_recipe");
-    return reply(many || [draft], { source: url.href });
+    return await reply(many || [draft], { source: url.href });
   } catch (e) {
     if (e instanceof ImportError) return json({ error: e.message, detail: e.detail }, 422);
     console.error(e);
