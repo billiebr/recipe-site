@@ -288,7 +288,8 @@ async function withGemini(setup, source, categories, { multi = false } = {}) {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text:
           "You turn a recipe (a web page, a video caption, a photo or pasted text) into fields for a family's Hebrew recipe book. " +
-          "Write every value in Hebrew, translating if the source is in another language. " +
+          "Write every value in Hebrew. When the source is in English or any other language, translate everything (title, ingredients, steps, notes) into natural Hebrew as an Israeli home cook would write it. " +
+          "When translating, convert Fahrenheit to Celsius and ounces, pounds and sticks of butter to grams; keep cups and spoons as כוס, כף, כפית. " +
           "Keep the ingredients, quantities and steps faithful to the source and do not invent ingredients or steps. " +
           "When an ingredient has no quantity in the source, add a typical amount for this recipe and start it with \"כ-\" so the family sees it is an estimate (for example \"כ-3 כפות שמן\", \"כ-1 כפית מלח\"). " +
           "When the source does not say how many it serves, estimate it the same way (for example \"כ-6 מנות\"). Leave time and author empty when the source does not say. " +
@@ -390,6 +391,23 @@ async function fillAmounts(r, categories) {
   return { ingredients: draft.ingredients, servings: recipe.servings || draft.servings };
 }
 
+// A recipe in another language, translated to Hebrew. Used for a saved recipe and when a page's own data was used without Gemini.
+const isForeign = r => { const t = [r.title, ...(r.ingredients || []), ...(r.steps || [])].join(" ");
+  return (t.match(/[A-Za-z]/g) || []).length > 2 * (t.match(/[\u05D0-\u05EA]/g) || []).length; };
+async function translate(r, categories) {
+  const setup = geminiSetup();
+  if (!setup) throw new ImportError("needs_ai_translate");
+  const recipe = {
+    title: String(r.title || ""), category: String(r.category || ""), author: String(r.author || ""), intro: String(r.intro || "").slice(0, 2000),
+    servings: String(r.servings || ""), time: String(r.time || ""), notes: String(r.notes || "").slice(0, 3000),
+    ingredients: (Array.isArray(r.ingredients) ? r.ingredients : []).map(String).slice(0, 200),
+    steps: (Array.isArray(r.steps) ? r.steps : []).map(String).slice(0, 200),
+  };
+  const d = await withGemini(setup, "Translate this recipe from the family book into Hebrew. Keep every ingredient, quantity and step, in the same order; " +
+    "keep group headers that end with a colon. Keep the author's name as written.\n" + JSON.stringify(recipe), categories);
+  return { ...d, author: recipe.author || d.author, category: d.category || recipe.category };
+}
+
 async function fromVideo(url, platform, categories) {
   const v = await readVideo(url, platform);
   if (!String(v.caption || "").trim() && !v.title) throw new ImportError("no_caption", `${platform}: no caption could be read`);
@@ -426,6 +444,7 @@ export default async (req) => {
     if (Array.isArray(body.images)) return reply(await fromImages(body.images, categories));
     if (typeof body.text === "string") return reply(await fromText(body.text, categories));
     if (body.fillAmounts && typeof body.fillAmounts === "object") return json({ recipe: await fillAmounts(body.fillAmounts, categories) });
+    if (body.translate && typeof body.translate === "object") return json({ recipe: await translate(body.translate, categories) });
     const url = checkUrl(body.url);
     const platform = platformOf(url);
     if (platform) return reply(await fromVideo(url, platform, categories), { source: url.href });
@@ -449,10 +468,16 @@ export default async (req) => {
           throw new ImportError("read_failed", String(e?.message || e));
         }
         draft = mapDirect(data, categories);
+        // The full page was too much for Gemini this time; the short recipe alone usually translates quickly.
+        if (isForeign(draft)) {
+          try { draft = await translate(draft, categories); }
+          catch { draft.untranslated = true; }
+        }
       }
     } else {
       if (!data) throw new ImportError("needs_ai");
       draft = mapDirect(data, categories);
+      if (isForeign(draft)) draft.untranslated = true;
     }
     if (!draft.title || (!draft.ingredients.length && !draft.steps.length)) throw new ImportError("no_recipe");
     return reply(many || [draft], { source: url.href });

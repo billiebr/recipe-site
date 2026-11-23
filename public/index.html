@@ -683,6 +683,7 @@ function openRecipe(id){
             <div class="salt-out" id="pOut" aria-live="polite"></div>
             <p class="hint" id="pNote"></p>
           </div>`:""}
+          ${isForeign(r)?`<div class="fill-row"><button class="btn ghost" id="trAmt" type="button">תרגום לעברית</button><span class="hint live" id="trMsg" aria-live="polite">המתכון כתוב בשפה אחרת.</span></div>`:""}
           ${missingAmounts(r)?`<div class="fill-row"><button class="btn ghost" id="fillAmt" type="button">השלמת כמויות</button><span class="hint live" id="fillMsg" aria-live="polite">יש מצרכים בלי כמות${r.servings?"":" ואין מספר מנות"}.</span></div>`:""}
           ${(r.ingredients||[]).length?`<div class="keep-row"><button class="btn ghost keep" id="keep" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#f6b400" d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path fill="#fff" d="M12 7a4 4 0 0 0-2.2 7.3V16h4.4v-1.7A4 4 0 0 0 12 7zm-2 10h4v1.2a.8.8 0 0 1-.8.8h-2.4a.8.8 0 0 1-.8-.8z"/></svg>יצירת רשימה ב-Keep</button><span class="hint live" id="keepMsg" aria-live="polite"></span></div>`:""}
         </section>
@@ -796,6 +797,12 @@ function openRecipe(id){
       openForm({...r,ingredients:add.ingredients,servings:add.servings||r.servings,_filled:true});}
     catch(err){$("#fillAmt").disabled=false;$("#fillMsg").textContent=err.message;}
   };
+  if($("#trAmt"))$("#trAmt").onclick=async()=>{
+    $("#trAmt").disabled=true;$("#trMsg").textContent="מתרגם… זה יכול לקחת כמה שניות.";
+    try{const {_t,_all,...plain}=r;const {recipe:he}=await api("POST",{translate:plain,categories:allCats()},null,"/api/import");
+      openForm({...r,title:he.title,intro:he.intro,servings:he.servings,time:he.time,ingredients:he.ingredients,steps:he.steps,notes:he.notes,_translated:true});}
+    catch(err){$("#trAmt").disabled=false;$("#trMsg").textContent=err.message;}
+  };
   $("#edit").onclick=()=>openForm(r);
   $("#del").onclick=async()=>{
     if(!await confirmBox(`בטוח מוחקים את ״${r.title}״?`,"המתכון יימחק מהספר לכל המשפחה, ואי אפשר לשחזר אותו.","כן, למחוק"))return;
@@ -851,6 +858,7 @@ function confirmBox(title,text,okLabel){
   });
 }
 function releaseWake(){if(typeof timers!=="undefined"&&timers.some(t=>!t.done))return; /* keep the screen on while a timer runs */try{wakeLock&&wakeLock.release();}catch{}wakeLock=null;}
+const isForeign=r=>{const t=[r.title,...(r.ingredients||[]),...(r.steps||[])].join(" ");return (t.match(/[A-Za-z]/g)||[]).length>2*(t.match(/[\u05D0-\u05EA]/g)||[]).length;};
 const isVideo=u=>{try{return /(^|\.)(instagram\.com|tiktok\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch)$/.test(new URL(u).hostname);}catch{return false;}};
 function shortUrl(u){try{return new URL(u).hostname.replace(/^www\./,"");}catch{return u;}}
 
@@ -872,7 +880,9 @@ function openForm(r){
       <div class="row-btns"><button class="btn" id="readPaste" type="button">סדר לי את המתכון</button></div>
       <span id="pasteMsg" class="hint live" aria-live="polite"></span></div></div>
     <div class="or">או מלאו בעצמכם</div>`:"";
-  const filledNote=r._filled?`<div class="callout video-note">הוספתי כמויות משוערות למצרכים שהיו בלי כמות, מסומנות ב״כ-״. בדקו, תקנו אם צריך ושמרו.</div>`:"";
+  const trNote=r._translated?`<div class="callout video-note">תרגמתי את המתכון לעברית. בדקו ושמרו.</div>`
+    :r.untranslated?`<div class="callout video-note">לא הצלחתי לתרגם לעברית הפעם (Gemini לא ענה בזמן). שמרו כך, ואחר כך לחצו ״תרגום לעברית״ במתכון.</div>`:"";
+  const filledNote=trNote+(r._filled?`<div class="callout video-note">הוספתי כמויות משוערות למצרכים שהיו בלי כמות, מסומנות ב״כ-״. בדקו, תקנו אם צריך ושמרו.</div>`:"");
   const videoNote=fromLink&&isVideo(r.source)&&!(r.ingredients||[]).length&&!(r.steps||[]).length
     ?`<div class="callout video-note">לא מצאתי בכיתוב חלוקה ברורה למצרכים ולשלבים, אז כל הכיתוב נמצא בשדה ״הערות״. העבירו את השורות למקום הנכון ושמרו.</div>`:"";
   const inBatch=batch&&r._b!=null;
@@ -995,7 +1005,7 @@ function openBatch(){
 
 /* Talking to the site's API. The family password travels in a header; a 401 sends the viewer back to the login screen. */
 const IMPORT_ERRORS={bad_url:"זה לא נראה כמו לינק לאתר. בדקו שהוא מתחיל ב-https://",fetch_failed:"לא הצלחתי לפתוח את הדף. בדקו את הלינק, או מלאו את המתכון בעצמכם.",
-  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם.",short_text:"הטקסט קצר מדי. הדביקו את כל המתכון.",needs_ai_fill:"השלמת כמויות צריכה את Gemini, והוא עוד לא מחובר לאתר.",no_ingredients:"אין במתכון מצרכים להשלים להם כמויות.",bad_image:"לא הצלחתי לקרוא את התמונה. נסו תמונה אחרת (JPG או PNG).",needs_ai_scan:"סריקה מתמונה צריכה את Gemini, והוא עוד לא מחובר לאתר.",no_recipe_image:"לא מצאתי מתכון בתמונה. נסו לצלם מקרוב יותר, עם תאורה טובה וכשכל הטקסט בתוך התמונה.",no_caption:"לא הצלחתי לקרוא את הכיתוב של הסרטון. אם הוא פרטי או שהאתר חסם את הקריאה, העתיקו את הכיתוב מהאפליקציה והדביקו אותו בשדות בעצמכם.",busy:"הקריאה האוטומטית הגיעה למכסה היומית החינמית. נסו שוב מחר, או מלאו את המתכון בעצמכם.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
+  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם.",short_text:"הטקסט קצר מדי. הדביקו את כל המתכון.",needs_ai_fill:"השלמת כמויות צריכה את Gemini, והוא עוד לא מחובר לאתר.",needs_ai_translate:"תרגום צריך את Gemini, והוא עוד לא מחובר לאתר.",no_ingredients:"אין במתכון מצרכים להשלים להם כמויות.",bad_image:"לא הצלחתי לקרוא את התמונה. נסו תמונה אחרת (JPG או PNG).",needs_ai_scan:"סריקה מתמונה צריכה את Gemini, והוא עוד לא מחובר לאתר.",no_recipe_image:"לא מצאתי מתכון בתמונה. נסו לצלם מקרוב יותר, עם תאורה טובה וכשכל הטקסט בתוך התמונה.",no_caption:"לא הצלחתי לקרוא את הכיתוב של הסרטון. אם הוא פרטי או שהאתר חסם את הקריאה, העתיקו את הכיתוב מהאפליקציה והדביקו אותו בשדות בעצמכם.",busy:"הקריאה האוטומטית הגיעה למכסה היומית החינמית. נסו שוב מחר, או מלאו את המתכון בעצמכם.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
 async function api(method,body,id,path="/api/recipes"){
   let res;
   try{res=await fetch(path+(id?`?id=${encodeURIComponent(id)}`:""),{method,headers:{"x-family-password":PW,...(body?{"content-type":"application/json"}:{})},body:body?JSON.stringify(body):undefined});}
