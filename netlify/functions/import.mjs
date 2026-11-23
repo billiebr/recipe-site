@@ -277,13 +277,34 @@ function geminiSetup() {
 // One source can hold several recipes (a carousel post, a cookbook spread, a long message).
 const MULTI_SCHEMA = { type: "OBJECT", properties: { recipes: { type: "ARRAY", items: DRAFT_SCHEMA } }, required: ["recipes"] };
 
-async function withGemini(setup, source, categories, { multi = false, known = false } = {}) {
+// When Google says a free model is overloaded ("high demand", 503) or out of quota for it, the next one usually answers.
+const FALLBACK_MODELS = { google: ["gemini-flash-latest", "gemini-2.5-flash-lite"], gateway: ["gemini-2.5-flash"] };
+const BUDGET_MS = 24000;
+
+async function withGemini(setup, source, categories, opts = {}) {
+  const models = [setup.model, ...FALLBACK_MODELS[setup.base === GOOGLE_BASE ? "google" : "gateway"].filter(m => m !== setup.model)];
+  const until = Date.now() + BUDGET_MS;
+  let last;
+  for (const model of models) {
+    const left = until - Date.now();
+    if (left < 3000) break;
+    try { return await askGemini({ ...setup, model }, source, categories, opts, Math.min(AI_MS, left)); }
+    catch (e) {
+      last = e;
+      if (!(e instanceof ImportError) || !e.retry) throw e;
+      console.error("gemini fallback:", e.detail);
+    }
+  }
+  throw new ImportError(last.message, last.detail);
+}
+
+async function askGemini(setup, source, categories, { multi = false, known = false } = {}, ms = AI_MS) {
   const { key: apiKey, base, model } = setup;
   let res;
   try {
     res = await fetch(`${base.replace(/\/+$/, "")}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
       method: "POST",
-      signal: AbortSignal.timeout(AI_MS),
+      signal: AbortSignal.timeout(ms),
       headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text:
@@ -303,7 +324,9 @@ async function withGemini(setup, source, categories, { multi = false, known = fa
       }),
     });
   } catch (e) {
-    throw new ImportError("read_failed", e.name === "TimeoutError" ? `Gemini did not answer within ${AI_MS / 1000}s` : `Gemini unreachable: ${e.message}`);
+    const err = new ImportError("read_failed", e.name === "TimeoutError" ? `Gemini did not answer within ${Math.round(ms / 1000)}s (${model})` : `Gemini unreachable: ${e.message}`);
+    err.retry = e.name === "TimeoutError";
+    throw err;
   }
   if (!res.ok) {
     const body = await res.text();
@@ -312,7 +335,10 @@ async function withGemini(setup, source, categories, { multi = false, known = fa
     try { message = JSON.parse(body).error?.message || message; } catch { /* not JSON */ }
     // For a rejected key, say what was saved (first 3 characters and length only) so a wrong value is easy to spot.
     const keyHint = /api key|auth|token/i.test(message) ? ` [key from ${setup.source}: starts "${apiKey.slice(0, 3)}", ${apiKey.length} characters]` : "";
-    throw new ImportError(res.status === 429 ? "busy" : "read_failed", `Gemini ${res.status} (${model}): ${message}${keyHint}`);
+    const overloaded = res.status === 503 || res.status === 500 || /high demand|overloaded/i.test(message);
+    const err = new ImportError(overloaded ? "overloaded" : res.status === 429 ? "busy" : "read_failed", `Gemini ${res.status} (${model}): ${message}${keyHint}`);
+    err.retry = overloaded || res.status === 429 || res.status === 404; // 404: this model name is not offered to this key
+    throw err;
   }
   const out = await res.json();
   const cand = out.candidates?.[0];

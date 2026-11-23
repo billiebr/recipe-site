@@ -633,7 +633,7 @@ function openRecipe(id){
   const ingHtml=()=>(r.ingredients||[]).map((t,i)=>{
     if(/[:：]$/.test(t))return `<li class="grp">${esc(t.replace(/[:：]$/,""))}</li>`;
     const [txt,changed]=scaleLine(t,k);
-    return `<li${changed?' class="scaled"':""}><label><input type="checkbox" id="ing${i}"><span>${k===1?hl(t,ts):esc(txt)}</span></label></li>`;}).join("");
+    return `<li${changed?' class="scaled"':""}><label><input type="checkbox" id="ing${i}"><span dir="auto">${k===1?hl(t,ts):esc(txt)}</span></label></li>`;}).join("");
   const ing=ingHtml();
   const UNIT_G={"מלפפון":100,"לימון":120,"גזר":100,"פלפל":150,"חציל":250,"כרובית":800,"כרוב":1200,"לפת":200,"צנון":300,"סלק":200,"זית":5,"עגבני":120,"בצל":150,"שום":50,"קולורבי":250};
   const guessG=()=>{const t=norm([r.title,r.servings,...(r.ingredients||[])].join(" "));for(const w in UNIT_G)if(t.includes(norm(w)))return UNIT_G[w];return 100;};
@@ -662,7 +662,7 @@ function openRecipe(id){
       html+=hl(t.slice(at,f.start),ts)+`<button type="button" class="tmr${changed?" scaled":""}" data-sec="${sec}" data-label="${esc(`${r.title} · שלב ${i+1}`)}"${changed?` title="במקור ${esc(f.text)}"`:""}>${TIMER_ICON}${esc(changed?fmtDur(sec):f.text)}</button>`;
       at=f.end;
     }
-    return `<li><span>${html+hl(t.slice(at),ts)}</span></li>`;}).join("");
+    return `<li><span dir="auto">${html+hl(t.slice(at),ts)}</span></li>`;}).join("");
   const steps=stepsHtml();
   const fact=(k,v)=>v?`<div><small>${k}</small><b>${esc(v)}</b></div>`:"";
   shell(`<div class="head${r.photo?" has-photo":""}" style="${headVars(r.category)}${photoStyle(r,false)}"><span class="glyph" aria-hidden="true">${esc(initial(r.title))}</span>
@@ -1005,7 +1005,7 @@ function openBatch(){
 
 /* Talking to the site's API. The family password travels in a header; a 401 sends the viewer back to the login screen. */
 const IMPORT_ERRORS={bad_url:"זה לא נראה כמו לינק לאתר. בדקו שהוא מתחיל ב-https://",fetch_failed:"לא הצלחתי לפתוח את הדף. בדקו את הלינק, או מלאו את המתכון בעצמכם.",
-  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם.",short_text:"הטקסט קצר מדי. הדביקו את כל המתכון.",needs_ai_fill:"השלמת כמויות צריכה את Gemini, והוא עוד לא מחובר לאתר.",still_foreign:"Gemini החזיר את המתכון שוב באנגלית. נסו שוב בעוד רגע.",needs_ai_translate:"תרגום צריך את Gemini, והוא עוד לא מחובר לאתר.",no_ingredients:"אין במתכון מצרכים להשלים להם כמויות.",bad_image:"לא הצלחתי לקרוא את התמונה. נסו תמונה אחרת (JPG או PNG).",needs_ai_scan:"סריקה מתמונה צריכה את Gemini, והוא עוד לא מחובר לאתר.",no_recipe_image:"לא מצאתי מתכון בתמונה. נסו לצלם מקרוב יותר, עם תאורה טובה וכשכל הטקסט בתוך התמונה.",no_caption:"לא הצלחתי לקרוא את הכיתוב של הסרטון. אם הוא פרטי או שהאתר חסם את הקריאה, העתיקו את הכיתוב מהאפליקציה והדביקו אותו בשדות בעצמכם.",busy:"הקריאה האוטומטית הגיעה למכסה היומית החינמית. נסו שוב מחר, או מלאו את המתכון בעצמכם.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
+  no_recipe:"לא מצאתי מתכון בדף הזה.",needs_ai:"האתר הזה לא מסמן את המתכון בצורה שאפשר לקרוא אוטומטית. מלאו אותו בעצמכם.",short_text:"הטקסט קצר מדי. הדביקו את כל המתכון.",needs_ai_fill:"השלמת כמויות צריכה את Gemini, והוא עוד לא מחובר לאתר.",still_foreign:"Gemini החזיר את המתכון שוב באנגלית. נסו שוב בעוד רגע.",overloaded:"Gemini עמוס כרגע אצל גוגל (זה זמני). נסו שוב בעוד כמה דקות.",needs_ai_translate:"תרגום צריך את Gemini, והוא עוד לא מחובר לאתר.",no_ingredients:"אין במתכון מצרכים להשלים להם כמויות.",bad_image:"לא הצלחתי לקרוא את התמונה. נסו תמונה אחרת (JPG או PNG).",needs_ai_scan:"סריקה מתמונה צריכה את Gemini, והוא עוד לא מחובר לאתר.",no_recipe_image:"לא מצאתי מתכון בתמונה. נסו לצלם מקרוב יותר, עם תאורה טובה וכשכל הטקסט בתוך התמונה.",no_caption:"לא הצלחתי לקרוא את הכיתוב של הסרטון. אם הוא פרטי או שהאתר חסם את הקריאה, העתיקו את הכיתוב מהאפליקציה והדביקו אותו בשדות בעצמכם.",busy:"הקריאה האוטומטית הגיעה למכסה היומית החינמית. נסו שוב מחר, או מלאו את המתכון בעצמכם.",read_failed:"לא הצלחתי לקרוא את המתכון. נסו שוב, או מלאו אותו בעצמכם."};
 async function api(method,body,id,path="/api/recipes"){
   let res;
   try{res=await fetch(path+(id?`?id=${encodeURIComponent(id)}`:""),{method,headers:{"x-family-password":PW,...(body?{"content-type":"application/json"}:{})},body:body?JSON.stringify(body):undefined});}
